@@ -1,6 +1,7 @@
 // src/pages/CowListPage.jsx
 
 import { useState, useEffect } from 'react';
+import { useOutletContext } from 'react-router-dom'; // <-- IMPORT
 import { Loader2, AlertCircle, Plus } from 'lucide-react';
 import { Alert, AlertDescription } from '../components/ui/alert';
 import { Badge } from '../components/ui/badge';
@@ -9,17 +10,22 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/
 import { CowCard } from '../components/CowCard';
 import { CowForm } from '../components/CowForm';
 import { DeleteCowDialog } from '../components/DeleteCowDialog';
+import { AddEventDialog } from '../components/AddEventDialog'; // <-- IMPORT
 import { api } from '../services/api';
 
-// Przyjmujemy propsy z App.jsx do zarządzania modem "Dodaj"
-export function CowListPage({ isAddDialogOpen, setIsAddDialogOpen, openAddDialog }) {
+// Odbieramy context z <Outlet> w App.jsx
+export function CowListPage() {
+  const { isAddDialogOpen, setIsAddDialogOpen, openAddDialog } = useOutletContext();
+  
   const [cows, setCows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   
-  // Stany dialogów Edit i Delete pozostają lokalne
+  // Stany dialogów lokalnych
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [isEventDialogOpen, setIsEventDialogOpen] = useState(false); // <-- NOWY STAN
+  
   const [selectedCow, setSelectedCow] = useState(null);
   const [formLoading, setFormLoading] = useState(false);
   const [formError, setFormError] = useState(null);
@@ -42,17 +48,16 @@ export function CowListPage({ isAddDialogOpen, setIsAddDialogOpen, openAddDialog
     }
   };
 
-  // Funkcja zamykająca wszystkie dialogi i resetująca stan
   const closeAllDialogs = () => {
-    setIsAddDialogOpen(false); // Używamy settera z propsów
+    setIsAddDialogOpen(false); 
     setIsEditDialogOpen(false);
     setIsDeleteDialogOpen(false);
+    setIsEventDialogOpen(false); // <-- Zamykaj też ten
     setSelectedCow(null);
     setFormError(null);
     setPhotoFile(null); 
   };
 
-  // Handler "Dodaj" używa settera z propsów
   const handleAddCow = async (formData) => {
     try {
       setFormLoading(true);
@@ -71,7 +76,6 @@ export function CowListPage({ isAddDialogOpen, setIsAddDialogOpen, openAddDialog
     }
   };
 
-  // Reszta handlerów (Edit, Delete) bez zmian
   const handleEditCow = async (formData) => {
     try {
       setFormLoading(true);
@@ -104,8 +108,23 @@ export function CowListPage({ isAddDialogOpen, setIsAddDialogOpen, openAddDialog
       setFormLoading(false);
     }
   };
+  
+  // NOWY HANDLER ZDARZENIA
+  const handleAddEvent = async (eventData) => {
+    try {
+      setFormLoading(true);
+      setFormError(null);
+      await api.createEvent(eventData);
+      // Nie musimy odświeżać listy krów, tylko zamykamy modal
+      closeAllDialogs();
+    } catch (err) {
+      setFormError(err.message);
+    } finally {
+      setFormLoading(false);
+    }
+  };
 
-  // Openery dialogów (Edit, Delete) bez zmian
+  // Openery dialogów
   const openEditDialog = (cow) => {
     setSelectedCow(cow);
     setFormError(null);
@@ -120,7 +139,11 @@ export function CowListPage({ isAddDialogOpen, setIsAddDialogOpen, openAddDialog
     setIsDeleteDialogOpen(true);
   };
   
-  // openAddDialog jest teraz przekazywane z góry
+  const openAddEventDialog = (cow) => {
+    setSelectedCow(cow);
+    setFormError(null);
+    setIsEventDialogOpen(true); // <-- Otwórz modal zdarzeń
+  };
   
   const getCowCountLabel = () => {
     const count = cows.length;
@@ -129,7 +152,6 @@ export function CowListPage({ isAddDialogOpen, setIsAddDialogOpen, openAddDialog
     return 'krów';
   };
 
-  // Stany ładowania i błędu (bez zmian)
   if (loading) {
     return (
       <div className="min-h-[70vh] flex items-center justify-center">
@@ -156,14 +178,8 @@ export function CowListPage({ isAddDialogOpen, setIsAddDialogOpen, openAddDialog
 
   return (
     <div className="relative">
-      {/* NAGŁÓWEK ZOSTAŁ USUNIĘTY 
-        (Jest teraz w App.jsx -> MainLayout)
-      */}
-
-      {/* Content */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         
-        {/* Pasek z liczbą krów i przyciskiem - widoczny tylko na mobile */}
         <div className="flex sm:hidden items-center justify-between mb-4">
           <Badge variant="outline" className="text-base px-4 py-2">
             {cows.length} {getCowCountLabel()}
@@ -192,14 +208,15 @@ export function CowListPage({ isAddDialogOpen, setIsAddDialogOpen, openAddDialog
                 cow={cow}
                 onEdit={openEditDialog}
                 onDelete={openDeleteDialog}
-                onClick={() => console.log('View cow details:', cow)}
+                onAddEvent={openAddEventDialog}
+                // onClick jest domyślny (nawigacja)
               />
             ))}
           </div>
         )}
       </div>
 
-      {/* Add Dialog (używa propsów isAddDialogOpen, setIsAddDialogOpen) */}
+      {/* Add Cow Dialog */}
       <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
         <DialogContent onClose={closeAllDialogs}>
           <DialogHeader>
@@ -220,7 +237,7 @@ export function CowListPage({ isAddDialogOpen, setIsAddDialogOpen, openAddDialog
         </DialogContent>
       </Dialog>
 
-      {/* Edit Dialog (działa lokalnie) */}
+      {/* Edit Dialog */}
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
         <DialogContent onClose={closeAllDialogs}>
           <DialogHeader>
@@ -241,8 +258,8 @@ export function CowListPage({ isAddDialogOpen, setIsAddDialogOpen, openAddDialog
           />
         </DialogContent>
       </Dialog>
-
-      {/* Delete Dialog (działa lokalnie) */}
+      
+      {/* Delete Dialog */}
       <DeleteCowDialog
         cow={selectedCow}
         open={isDeleteDialogOpen}
@@ -251,8 +268,16 @@ export function CowListPage({ isAddDialogOpen, setIsAddDialogOpen, openAddDialog
         loading={formLoading}
         error={formError}
       />
-
-      {/* Footer został usunięty, bo mamy dolną nawigację */}
+      
+      {/* NOWY Add Event Dialog */}
+      <AddEventDialog
+        cow={selectedCow}
+        open={isEventDialogOpen}
+        onOpenChange={setIsEventDialogOpen}
+        onSubmit={handleAddEvent}
+        loading={formLoading}
+        error={formError}
+      />
     </div>
   );
 }

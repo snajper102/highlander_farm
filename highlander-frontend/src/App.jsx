@@ -1,13 +1,31 @@
 // src/App.jsx
-import { Routes, Route, Outlet } from 'react-router-dom';
+import { Routes, Route, Outlet, useLocation } from 'react-router-dom';
 import { CowListPage } from './pages/CowListPage';
 import { ScannerPage } from './pages/ScannerPage';
+import { CowDetailPage } from './pages/CowDetailPage'; 
 import { NavBar } from './components/NavBar';
 import { Button } from './components/ui/button';
 import { Plus } from 'lucide-react';
+import { useState } from 'react';
 
 // Komponent Głównego Layoutu
-function MainLayout({ onAddCowClick }) {
+function MainLayout() {
+  // Stan "Dodaj Krowę" musi żyć tutaj, aby MainLayout mógł go przekazać do CowListPage
+  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const openAddDialog = () => setIsAddDialogOpen(true);
+
+  // Sprawdź aktualną lokalizację, aby ukryć przycisk "Dodaj"
+  const location = useLocation();
+  const showAddButton = location.pathname === '/';
+  
+  // Ukryj cały layout na stronie szczegółów (desktop)
+  // Strona szczegółów ma własny header
+  const isDetailPage = location.pathname.startsWith('/cow/');
+
+  if (isDetailPage) {
+    return <Outlet />; // Strona szczegółów renderuje się sama
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50">
       {/* Header */}
@@ -20,54 +38,45 @@ function MainLayout({ onAddCowClick }) {
               </h1>
               <p className="text-gray-600 mt-1">Zarządzanie stadem krów Highland Cattle</p>
             </div>
-            {/* Przycisk "Dodaj" przeniesiony do głównego layoutu dla spójności */}
             <div className="flex items-center gap-4 w-full sm:w-auto">
-              <Button onClick={onAddCowClick} className="w-full sm:w-auto hidden sm:flex">
-                <Plus className="w-4 h-4 mr-2" />
-                Dodaj krowę
-              </Button>
+              {showAddButton && (
+                <Button onClick={openAddDialog} className="w-full sm:w-auto hidden sm:flex">
+                  <Plus className="w-4 h-4 mr-2" />
+                  Dodaj krowę
+                </Button>
+              )}
             </div>
           </div>
         </div>
       </div>
 
       {/* Główna zawartość strony + padding na dolny navbar */}
-      <main className="pb-24">
-        <Outlet /> {/* <-- Tutaj renderują się pod-strony (Lista lub Skaner) */}
+      <main className="pb-20 sm:pb-0"> 
+        {/* Przekazujemy stan modala do Outletu za pomocą "context" */}
+        <Outlet context={{ isAddDialogOpen, setIsAddDialogOpen, openAddDialog }} />
       </main>
 
-      {/* Dolna Nawigacja */}
-      <NavBar />
+      {/* Dolna Nawigacja (tylko na mobile) */}
+      <div className="sm:hidden">
+        <NavBar />
+      </div>
     </div>
   );
 }
 
 function App() {
-  // Stan i funkcja do otwierania modala "Dodaj krowę"
-  // Muszą być w App.jsx, aby przekazać je do MainLayout i CowListPage
-  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
-  const openAddDialog = () => setIsAddDialogOpen(true);
-
   return (
     <Routes>
-      <Route path="/" element={<MainLayout onAddCowClick={openAddDialog} />}>
-        <Route 
-          index 
-          element={
-            <CowListPage 
-              isAddDialogOpen={isAddDialogOpen} 
-              setIsAddDialogOpen={setIsAddDialogOpen}
-              openAddDialog={openAddDialog}
-            />
-          } 
-        />
+      {/* Główny Layout (dla listy i skanera) */}
+      <Route path="/" element={<MainLayout />}>
+        <Route index element={<CowListPage />} />
         <Route path="scan" element={<ScannerPage />} />
-        {/* TODO: Dodać ścieżkę /cow/:id dla szczegółów */}
       </Route>
+      
+      {/* Strona szczegółów (bez głównego layoutu) */}
+      <Route path="cow/:id" element={<CowDetailPage />} />
     </Routes>
   );
 }
 
-// Musimy dodać import useState
-import { useState } from 'react';
 export default App
