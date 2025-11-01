@@ -1,10 +1,17 @@
+# cows/views.py
+
 from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from django_filters.rest_framework import DjangoFilterBackend
 from .models import Cow
-from .serializers import CowSerializer, CowCreateUpdateSerializer
+# Zmień importy serializerów
+from .serializers import (
+    CowSerializer,
+    CowCreateUpdateSerializer,
+    CowListSerializer
+)
 
 
 class CowViewSet(viewsets.ModelViewSet):
@@ -18,7 +25,6 @@ class CowViewSet(viewsets.ModelViewSet):
     - DELETE /api/cows/{id}/ - usunięcie krowy
     """
     queryset = Cow.objects.all()
-    serializer_class = CowSerializer
     parser_classes = (MultiPartParser, FormParser, JSONParser)
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['gender', 'breed']
@@ -27,19 +33,34 @@ class CowViewSet(viewsets.ModelViewSet):
     ordering = ['-created_at']
 
     def get_serializer_class(self):
-        """Użyj innego serializera dla tworzenia/aktualizacji"""
+        """Użyj innego serializera dla różnych akcji"""
         if self.action in ['create', 'update', 'partial_update']:
             return CowCreateUpdateSerializer
-        return CowSerializer
+        if self.action == 'list':  # <-- DODAJ TO
+            return CowListSerializer
+        return CowSerializer  # Domyślny (dla retrieve)
+
+    def get_serializer_context(self):
+        """Dodaj 'request' do kontekstu serializera"""
+        context = super().get_serializer_context()
+        context.update({'request': self.request})
+        return context
 
     def create(self, request, *args, **kwargs):
         """POST /api/cows/ - Dodanie nowej krowy"""
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        self.perform_create(serializer)
+
+        # Zmieniona logika: zapisz instancję
+        instance = serializer.save()  # <-- ZMIANA
+
         headers = self.get_success_headers(serializer.data)
+
+        # Zwróć dane używając pełnego serializera (z wiekiem i URL-em zdjęcia)
+        response_serializer = CowSerializer(instance, context=self.get_serializer_context())  # <-- ZMIANA
+
         return Response(
-            serializer.data,
+            response_serializer.data,  # <-- ZMIANA
             status=status.HTTP_201_CREATED,
             headers=headers
         )
@@ -53,7 +74,7 @@ class CowViewSet(viewsets.ModelViewSet):
         self.perform_update(serializer)
 
         # Zwróć dane z głównym serializerem (z wyliczonym wiekiem)
-        response_serializer = CowSerializer(instance)
+        response_serializer = CowSerializer(instance, context=self.get_serializer_context())
         return Response(response_serializer.data)
 
     def partial_update(self, request, *args, **kwargs):
@@ -83,7 +104,7 @@ class CowViewSet(viewsets.ModelViewSet):
 
         try:
             cow = Cow.objects.get(tag_id=tag_id)
-            serializer = CowSerializer(cow)
+            serializer = CowSerializer(cow, context=self.get_serializer_context())  # <-- ZMIANA
             return Response(serializer.data)
         except Cow.DoesNotExist:
             return Response(
@@ -122,7 +143,7 @@ class CowViewSet(viewsets.ModelViewSet):
             'average_age': round(avg_age, 1)
         })
 
-    @action(detail=True, methods=['post'])
+    @action(detail=True, methods=['post'], parser_classes=[MultiPartParser, FormParser])
     def upload_photo(self, request, pk=None):
         """POST /api/cows/{id}/upload_photo/ - Upload zdjęcia"""
         cow = self.get_object()
@@ -132,8 +153,12 @@ class CowViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+        # Usuń stare zdjęcie, jeśli istnieje
+        if cow.photo:
+            cow.photo.delete(save=False)
+
         cow.photo = request.FILES['photo']
         cow.save()
 
-        serializer = CowSerializer(cow)
+        serializer = CowSerializer(cow, context=self.get_serializer_context())
         return Response(serializer.data)

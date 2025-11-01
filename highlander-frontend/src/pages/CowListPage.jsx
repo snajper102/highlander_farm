@@ -1,3 +1,5 @@
+// src/pages/CowListPage.jsx
+
 import { useState, useEffect } from 'react';
 import { Loader2, AlertCircle, Plus } from 'lucide-react';
 import { Alert, AlertDescription } from '../components/ui/alert';
@@ -9,18 +11,19 @@ import { CowForm } from '../components/CowForm';
 import { DeleteCowDialog } from '../components/DeleteCowDialog';
 import { api } from '../services/api';
 
-export function CowListPage() {
+// Przyjmujemy propsy z App.jsx do zarządzania modem "Dodaj"
+export function CowListPage({ isAddDialogOpen, setIsAddDialogOpen, openAddDialog }) {
   const [cows, setCows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-
-  // Dialog states
-  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  
+  // Stany dialogów Edit i Delete pozostają lokalne
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [selectedCow, setSelectedCow] = useState(null);
   const [formLoading, setFormLoading] = useState(false);
   const [formError, setFormError] = useState(null);
+  const [photoFile, setPhotoFile] = useState(null);
 
   useEffect(() => {
     fetchCows();
@@ -30,7 +33,7 @@ export function CowListPage() {
     try {
       setLoading(true);
       const data = await api.getCows();
-      setCows(data.results || data);
+      setCows(Array.isArray(data.results) ? data.results : Array.isArray(data) ? data : []);
       setError(null);
     } catch (err) {
       setError(err.message);
@@ -39,14 +42,28 @@ export function CowListPage() {
     }
   };
 
-  // Add cow
+  // Funkcja zamykająca wszystkie dialogi i resetująca stan
+  const closeAllDialogs = () => {
+    setIsAddDialogOpen(false); // Używamy settera z propsów
+    setIsEditDialogOpen(false);
+    setIsDeleteDialogOpen(false);
+    setSelectedCow(null);
+    setFormError(null);
+    setPhotoFile(null); 
+  };
+
+  // Handler "Dodaj" używa settera z propsów
   const handleAddCow = async (formData) => {
     try {
       setFormLoading(true);
       setFormError(null);
-      await api.createCow(formData);
+      const { photo, ...dataToSend } = formData;
+      const newCow = await api.createCow(dataToSend);
+      if (photoFile && newCow.id) {
+        await api.uploadPhoto(newCow.id, photoFile);
+      }
       await fetchCows();
-      setIsAddDialogOpen(false);
+      closeAllDialogs();
     } catch (err) {
       setFormError(err.message);
     } finally {
@@ -54,15 +71,18 @@ export function CowListPage() {
     }
   };
 
-  // Edit cow
+  // Reszta handlerów (Edit, Delete) bez zmian
   const handleEditCow = async (formData) => {
     try {
       setFormLoading(true);
       setFormError(null);
-      await api.updateCow(selectedCow.id, formData);
+      const { photo, ...dataToSend } = formData;
+      const updatedCow = await api.updateCow(selectedCow.id, dataToSend);
+      if (photoFile && updatedCow.id) {
+        await api.uploadPhoto(updatedCow.id, photoFile);
+      }
       await fetchCows();
-      setIsEditDialogOpen(false);
-      setSelectedCow(null);
+      closeAllDialogs();
     } catch (err) {
       setFormError(err.message);
     } finally {
@@ -70,15 +90,14 @@ export function CowListPage() {
     }
   };
 
-  // Delete cow
   const handleDeleteCow = async () => {
+    if (!selectedCow) return;
     try {
       setFormLoading(true);
       setFormError(null);
       await api.deleteCow(selectedCow.id);
       await fetchCows();
-      setIsDeleteDialogOpen(false);
-      setSelectedCow(null);
+      closeAllDialogs();
     } catch (err) {
       setFormError(err.message);
     } finally {
@@ -86,27 +105,34 @@ export function CowListPage() {
     }
   };
 
-  // Open dialogs
+  // Openery dialogów (Edit, Delete) bez zmian
   const openEditDialog = (cow) => {
     setSelectedCow(cow);
     setFormError(null);
+    setPhotoFile(null); 
     setIsEditDialogOpen(true);
   };
 
   const openDeleteDialog = (cow) => {
     setSelectedCow(cow);
     setFormError(null);
+    setPhotoFile(null); 
     setIsDeleteDialogOpen(true);
   };
-
-  const openAddDialog = () => {
-    setFormError(null);
-    setIsAddDialogOpen(true);
+  
+  // openAddDialog jest teraz przekazywane z góry
+  
+  const getCowCountLabel = () => {
+    const count = cows.length;
+    if (count === 1) return 'krowa';
+    if (count > 1 && count < 5) return 'krowy';
+    return 'krów';
   };
 
+  // Stany ładowania i błędu (bez zmian)
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-emerald-50 to-teal-50 flex items-center justify-center">
+      <div className="min-h-[70vh] flex items-center justify-center">
         <div className="text-center">
           <Loader2 className="w-12 h-12 animate-spin text-emerald-600 mx-auto mb-4" />
           <p className="text-gray-600">Ładowanie danych...</p>
@@ -117,7 +143,7 @@ export function CowListPage() {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-emerald-50 to-teal-50 p-8">
+      <div className="p-8">
         <Alert variant="destructive" className="max-w-2xl mx-auto">
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>
@@ -129,32 +155,25 @@ export function CowListPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50">
-      {/* Header */}
-      <div className="bg-white/80 backdrop-blur-sm border-b border-emerald-200 sticky top-0 z-10">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-3">
-                🐄 Highlander Farm
-              </h1>
-              <p className="text-gray-600 mt-1">Zarządzanie stadem krów Highland Cattle</p>
-            </div>
-            <div className="flex items-center gap-4">
-              <Badge variant="outline" className="text-lg px-4 py-2">
-                {cows.length} {cows.length === 1 ? 'krowa' : cows.length < 5 ? 'krowy' : 'krów'}
-              </Badge>
-              <Button onClick={openAddDialog}>
-                <Plus className="w-4 h-4 mr-2" />
-                Dodaj krowę
-              </Button>
-            </div>
-          </div>
-        </div>
-      </div>
+    <div className="relative">
+      {/* NAGŁÓWEK ZOSTAŁ USUNIĘTY 
+        (Jest teraz w App.jsx -> MainLayout)
+      */}
 
       {/* Content */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        
+        {/* Pasek z liczbą krów i przyciskiem - widoczny tylko na mobile */}
+        <div className="flex sm:hidden items-center justify-between mb-4">
+          <Badge variant="outline" className="text-base px-4 py-2">
+            {cows.length} {getCowCountLabel()}
+          </Badge>
+          <Button onClick={openAddDialog} size="sm">
+            <Plus className="w-4 h-4 mr-2" />
+            Dodaj
+          </Button>
+        </div>
+
         {cows.length === 0 ? (
           <div className="text-center py-12 bg-white rounded-lg shadow">
             <p className="text-gray-500 text-lg mb-4">
@@ -173,41 +192,42 @@ export function CowListPage() {
                 cow={cow}
                 onEdit={openEditDialog}
                 onDelete={openDeleteDialog}
-                onClick={() => console.log('View cow:', cow)}
+                onClick={() => console.log('View cow details:', cow)}
               />
             ))}
           </div>
         )}
       </div>
 
-      {/* Add Dialog */}
+      {/* Add Dialog (używa propsów isAddDialogOpen, setIsAddDialogOpen) */}
       <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-        <DialogContent onClose={() => setIsAddDialogOpen(false)}>
+        <DialogContent onClose={closeAllDialogs}>
           <DialogHeader>
             <DialogTitle>Dodaj nową krowę</DialogTitle>
           </DialogHeader>
           {formError && (
-            <Alert variant="destructive">
+            <Alert variant="destructive" className="mt-4">
               <AlertCircle className="h-4 w-4" />
               <AlertDescription>{formError}</AlertDescription>
             </Alert>
           )}
           <CowForm
             onSubmit={handleAddCow}
-            onCancel={() => setIsAddDialogOpen(false)}
+            onCancel={closeAllDialogs}
             loading={formLoading}
+            onPhotoChange={setPhotoFile} 
           />
         </DialogContent>
       </Dialog>
 
-      {/* Edit Dialog */}
+      {/* Edit Dialog (działa lokalnie) */}
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-        <DialogContent onClose={() => setIsEditDialogOpen(false)}>
+        <DialogContent onClose={closeAllDialogs}>
           <DialogHeader>
             <DialogTitle>Edytuj krowę</DialogTitle>
           </DialogHeader>
           {formError && (
-            <Alert variant="destructive">
+            <Alert variant="destructive" className="mt-4">
               <AlertCircle className="h-4 w-4" />
               <AlertDescription>{formError}</AlertDescription>
             </Alert>
@@ -215,13 +235,14 @@ export function CowListPage() {
           <CowForm
             cow={selectedCow}
             onSubmit={handleEditCow}
-            onCancel={() => setIsEditDialogOpen(false)}
+            onCancel={closeAllDialogs}
             loading={formLoading}
+            onPhotoChange={setPhotoFile} 
           />
         </DialogContent>
       </Dialog>
 
-      {/* Delete Dialog */}
+      {/* Delete Dialog (działa lokalnie) */}
       <DeleteCowDialog
         cow={selectedCow}
         open={isDeleteDialogOpen}
@@ -231,10 +252,7 @@ export function CowListPage() {
         error={formError}
       />
 
-      {/* Footer */}
-      <div className="text-center py-8 text-gray-500 text-sm">
-        <p>Highlander Farm Management System v0.2</p>
-      </div>
+      {/* Footer został usunięty, bo mamy dolną nawigację */}
     </div>
   );
 }

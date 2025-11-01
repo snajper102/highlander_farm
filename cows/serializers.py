@@ -1,10 +1,13 @@
+# cows/serializers.py
+
 from rest_framework import serializers
 from .models import Cow
 
 
 class CowSerializer(serializers.ModelSerializer):
-    """Serializer do odczytu (GET) - z obliczonym wiekiem"""
+    """Serializer do odczytu (GET) - z obliczonym wiekiem i pełnym URL zdjęcia"""
     age = serializers.SerializerMethodField()
+    photo = serializers.SerializerMethodField()  # <-- ZMIANA
 
     class Meta:
         model = Cow
@@ -17,6 +20,16 @@ class CowSerializer(serializers.ModelSerializer):
         age = today.year - obj.birth_date.year - ((today.month, today.day) < (obj.birth_date.month, obj.birth_date.day))
         return age
 
+    def get_photo(self, obj):  # <-- DODAJ TĘ METODĘ
+        """Zwraca pełny, absolutny URL do zdjęcia"""
+        if obj.photo:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.photo.url)
+            # Fallback, jeśli request nie jest dostępny
+            return obj.photo.url
+        return None
+
 
 class CowCreateUpdateSerializer(serializers.ModelSerializer):
     """Serializer do tworzenia/aktualizacji (POST/PUT/PATCH)"""
@@ -25,7 +38,8 @@ class CowCreateUpdateSerializer(serializers.ModelSerializer):
         model = Cow
         fields = ['id', 'tag_id', 'name', 'breed', 'birth_date', 'gender', 'photo']
         extra_kwargs = {
-            'photo': {'required': False, 'allow_null': True}
+            'photo': {'required': False, 'allow_null': True, 'read_only': True}  # <-- ZMIANA 'read_only'
+            # Zdjęcie będzie wysyłane osobno, więc formularz go nie wymaga
         }
 
     def validate_tag_id(self, value):
@@ -46,16 +60,25 @@ class CowCreateUpdateSerializer(serializers.ModelSerializer):
         return value
 
 
-class CowListSerializer(serializers.ModelSerializer):
-    """Serializer dla listy (uproszczony, bez zdjęć)"""
+class CowListSerializer(serializers.ModelSerializer):  # <-- AKTUALIZACJA TEGO SERIALIZERA
+    """Serializer dla listy (uproszczony)"""
     age = serializers.SerializerMethodField()
+    photo = serializers.SerializerMethodField()  # <-- ZMIANA
 
     class Meta:
         model = Cow
-        fields = ['id', 'tag_id', 'name', 'breed', 'birth_date', 'gender', 'age']
+        fields = ['id', 'tag_id', 'name', 'breed', 'birth_date', 'gender', 'photo', 'age']  # <-- Dodano photo
 
     def get_age(self, obj):
         from datetime import date
         today = date.today()
         age = today.year - obj.birth_date.year - ((today.month, today.day) < (obj.birth_date.month, obj.birth_date.day))
         return age
+
+    def get_photo(self, obj):  # <-- DODAJ TĘ METODĘ
+        if obj.photo:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.photo.url)
+            return obj.photo.url
+        return None
