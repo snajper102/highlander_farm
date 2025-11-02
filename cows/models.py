@@ -1,11 +1,18 @@
 # cows/models.py
 from django.db import models
-from django.conf import settings # Potrzebne dla relacji z User
+from django.conf import settings
 
 class Cow(models.Model):
     GENDER_CHOICES = [
         ('M', 'Samiec'),
         ('F', 'Samica'),
+    ]
+    
+    # === NOWE POLE STATUS ===
+    STATUS_CHOICES = [
+        ('ACTIVE', 'Aktywna'),
+        ('SOLD', 'Sprzedana'),
+        ('ARCHIVED', 'Zarchiwizowana'),
     ]
     
     tag_id = models.CharField(max_length=50, unique=True, verbose_name="Numer kolczyka")
@@ -15,18 +22,28 @@ class Cow(models.Model):
     gender = models.CharField(max_length=1, choices=GENDER_CHOICES, default='F', verbose_name="Płeć")
     photo = models.ImageField(upload_to='cows/', blank=True, null=True, verbose_name="Zdjęcie")
     
+    # Dodajemy status, domyślnie 'Aktywna'
+    status = models.CharField(
+        max_length=10, 
+        choices=STATUS_CHOICES, 
+        default='ACTIVE', 
+        verbose_name="Status",
+        db_index=True # Dodajemy indeks dla szybszego filtrowania
+    )
+    
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
     class Meta:
-        ordering = ['-created_at']
+        # Usuwamy domyślne sortowanie, będzie w widoku
+        # ordering = ['-created_at'] 
         verbose_name = "Krowa"
         verbose_name_plural = "Krowy"
     
     def __str__(self):
         return f"{self.tag_id} - {self.name}"
 
-# === NOWY MODEL ===
+# === Model Event (bez zmian) ===
 class Event(models.Model):
     EVENT_TYPE_CHOICES = [
         ('LECZENIE', 'Leczenie'),
@@ -41,7 +58,6 @@ class Event(models.Model):
     date = models.DateField(verbose_name="Data zdarzenia")
     notes = models.TextField(blank=True, null=True, verbose_name="Notatki")
     
-    # Na razie user jest opcjonalny, dopóki nie zrobimy logowania
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, 
         on_delete=models.SET_NULL, 
@@ -53,7 +69,7 @@ class Event(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     
     class Meta:
-        ordering = ['-date', '-created_at'] # Najnowsze zdarzenia pierwsze
+        ordering = ['-date', '-created_at'] 
         verbose_name = "Zdarzenie"
         verbose_name_plural = "Zdarzenia"
 

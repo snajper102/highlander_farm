@@ -4,31 +4,32 @@ import { CowListPage } from './pages/CowListPage';
 import { ScannerPage } from './pages/ScannerPage';
 import { CowDetailPage } from './pages/CowDetailPage'; 
 import { LoginPage } from './pages/LoginPage';
-import { ProtectedRoute } from './components/ProtectedRoute';
+import { ProtectedRoute } from './components/ProtectedRoute'; 
+import { AdminRoute } from './components/AdminRoute'; 
+import { UserManagementPage } from './pages/UserManagementPage'; 
+import { DashboardPage } from './pages/DashboardPage'; // <-- IMPORT DASHBOARDU
 import { NavBar } from './components/NavBar';
 import { Button } from './components/ui/button';
 import { Plus } from 'lucide-react';
 import { useState } from 'react';
 import { ReloadPrompt } from './components/ReloadPrompt'; 
 import { useAuth } from './contexts/AuthContext';
-import { Toaster } from './components/ui/sonner'; // <-- IMPORT TOASTER
-import { ModeToggle } from './components/ModeToggle'; // <-- IMPORT TOGGLE
+import { Toaster } from './components/ui/sonner'; 
+import { ModeToggle } from './components/ModeToggle'; 
 
 // Komponent Głównego Layoutu
 function MainLayout() {
-  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
-  const openAddDialog = () => setIsAddDialogOpen(true);
-
+  // Przycisk "Dodaj Krowę" został przeniesiony do CowListPage
+  // Ten layout jest teraz "głupszy"
   const location = useLocation();
-  const showAddButton = location.pathname === '/';
-  const isDetailPage = location.pathname.startsWith('/cow/');
+  const isExcludedPage = location.pathname.startsWith('/cow/') || location.pathname.startsWith('/admin');
 
-  if (isDetailPage) {
+  if (isExcludedPage) {
     return <Outlet />; 
   }
 
   return (
-    <div className="min-h-screen bg-background text-foreground"> {/* ZMIANA: Usunięto gradient, aby dark mode działał */}
+    <div className="min-h-screen bg-background text-foreground">
       {/* Header */}
       <div className="bg-background/80 backdrop-blur-sm border-b border-border sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
@@ -40,20 +41,16 @@ function MainLayout() {
               <p className="text-muted-foreground mt-1">Zarządzanie stadem krów Highland Cattle</p>
             </div>
             <div className="flex items-center gap-4 w-full sm:w-auto">
-              {showAddButton && (
-                <Button onClick={openAddDialog} className="w-full sm:w-auto hidden sm:flex">
-                  <Plus className="w-4 h-4 mr-2" />
-                  Dodaj krowę
-                </Button>
-              )}
-              <ModeToggle /> {/* <-- PRZYCISK DARK MODE */}
+              {/* Przycisk "Dodaj" został przeniesiony */}
+              <ModeToggle /> 
             </div>
           </div>
         </div>
       </div>
 
+      {/* ZMIANA: context jest już niepotrzebny */}
       <main className="pb-20"> 
-        <Outlet context={{ isAddDialogOpen, setIsAddDialogOpen, openAddDialog }} />
+        <Outlet />
       </main>
 
       <div>
@@ -70,24 +67,27 @@ function App() {
     <> 
       <Routes>
         <Route path="/login" element={<LoginPage />} />
-        <Route 
-          element={
-            <ProtectedRoute>
-              <Outlet />
-            </ProtectedRoute>
-          }
-        >
+        
+        <Route element={<ProtectedRoute />}>
+          {/* === ZMIANA ROUTINGU === */}
           <Route path="/" element={<MainLayout />}>
-            <Route index element={<CowListPage />} />
+            <Route index element={<DashboardPage />} /> {/* <-- Dashboard jest teraz stroną główną */}
+            <Route path="herd" element={<CowListPage />} /> {/* <-- Lista krów jest na /herd */}
             <Route path="scan" element={<ScannerPage />} />
           </Route>
+          
           <Route path="cow/:id" element={<CowDetailPage />} />
+          
+          <Route path="/admin" element={<AdminRoute />}>
+            <Route path="users" element={<UserManagementPage />} />
+          </Route>
         </Route>
+        
         <Route path="*" element={isLoggedIn ? <Navigate to="/" /> : <Navigate to="/login" />} />
       </Routes>
       
       <ReloadPrompt /> 
-      <Toaster position="top-center" richColors /> {/* <-- GLOBALNY TOASTER */}
+      <Toaster position="top-center" richColors />
     </>
   );
 }
