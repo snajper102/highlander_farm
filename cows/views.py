@@ -5,27 +5,26 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from django_filters.rest_framework import DjangoFilterBackend
-# === POPRAWKA: Usunięto CowDocument ===
-from .models import Cow, Event 
+from .models import Cow, Event, CowDocument, Task 
 from .serializers import (
     CowSerializer, 
     CowCreateUpdateSerializer, 
     CowListSerializer,
     EventSerializer,
-    # Usunięto CowDocumentSerializer
+    CowDocumentSerializer, 
+    TaskSerializer, 
     UserSerializer, 
     UserCreateSerializer, 
-    UserPasswordUpdateSerializer 
+    UserPasswordUpdateSerializer,
+    CowPedigreeSerializer,
+    CowOffspringSerializer
 )
 from django.db import transaction, IntegrityError
 import logging
 from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser
 from django.contrib.auth.models import User 
-
-# === NOWE IMPORTY DLA STATYSTYK ===
 from datetime import date, timedelta
-from django.db.models import Count
-# ==================================
+from django.db.models import Count, Q 
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +32,6 @@ logger = logging.getLogger(__name__)
 class SyncView(views.APIView):
     parser_classes = [JSONParser]
     permission_classes = [IsAuthenticated] 
-
     def post(self, request, *args, **kwargs):
         jobs = request.data.get('jobs', [])
         results = []
@@ -46,6 +44,8 @@ class SyncView(views.APIView):
                     try:
                         if action == 'createCow':
                             payload.pop('id', None) 
+                            if 'dam' in payload and payload['dam'] in temp_id_map: payload['dam'] = temp_id_map[payload['dam']]
+                            if 'sire' in payload and payload['sire'] in temp_id_map: payload['sire'] = temp_id_map[payload['sire']]
                             serializer = CowCreateUpdateSerializer(data=payload)
                             if serializer.is_valid(raise_exception=True):
                                 new_cow = serializer.save(); temp_id_map[temp_id] = new_cow.id; job_result.update(status="ok", realId=new_cow.id)
@@ -53,6 +53,8 @@ class SyncView(views.APIView):
                             real_id = temp_id_map.get(entity_id, entity_id) 
                             if real_id < 0: job_result.update(status="merged", realId=real_id) 
                             else:
+                                if 'dam' in payload and payload['dam'] in temp_id_map: payload['dam'] = temp_id_map[payload['dam']]
+                                if 'sire' in payload and payload['sire'] in temp_id_map: payload['sire'] = temp_id_map[payload['sire']]
                                 cow = Cow.objects.get(id=real_id); serializer = CowCreateUpdateSerializer(cow, data=payload, partial=True)
                                 if serializer.is_valid(raise_exception=True): serializer.save(); job_result.update(status="ok", realId=real_id)
                         elif action == 'deleteCow': # Archiwizacja
@@ -62,17 +64,46 @@ class SyncView(views.APIView):
                             job_result.update(status="ok", realId=real_id)
                         elif action == 'createEvent':
                             payload.pop('id', None); cow_id = payload.get('cow')
-                            if cow_id in temp_id_map: payload['cow'] = temp_id_map[cow_id]
+                            if cow_id in temp_id_map: payload['cow'] = temp_id_map[payload['cow']]
                             serializer = EventSerializer(data=payload, context={'request': request})
                             if serializer.is_valid(raise_exception=True):
                                 new_event = serializer.save(); temp_id_map[temp_id] = new_event.id; job_result.update(status="ok", realId=new_event.id)
                         
-                        # Usunięto 'deleteDocument'
+                        # === DODANO deleteDocument ===
+                        elif action == 'deleteDocument':
+                            real_id = temp_id_map.get(entity_id, entity_id)
+                            if real_id > 0:
+                                CowDocument.objects.get(id=real_id).delete()
+                            job_result.update(status="ok", realId=real_id)
+                            
+                        elif action == 'createTask':
+                            payload.pop('id', None)
+                            cow_id = payload.get('cow')
+                            if cow_id and cow_id in temp_id_map: 
+                                payload['cow'] = temp_id_map[cow_id]
+                            serializer = TaskSerializer(data=payload, context={'request': request})
+                            if serializer.is_valid(raise_exception=True):
+                                new_task = serializer.save(); temp_id_map[temp_id] = new_task.id; job_result.update(status="ok", realId=new_task.id)
+                        elif action == 'updateTask':
+                            real_id = temp_id_map.get(entity_id, entity_id)
+                            if real_id < 0: job_result.update(status="merged", realId=real_id)
+                            else:
+                                cow_id = payload.get('cow')
+                                if cow_id and cow_id in temp_id_map: 
+                                    payload['cow'] = temp_id_map[cow_id]
+                                task = Task.objects.get(id=real_id)
+                                serializer = TaskSerializer(task, data=payload, partial=True)
+                                if serializer.is_valid(raise_exception=True):
+                                    serializer.save(); job_result.update(status="ok", realId=real_id)
+                        elif action == 'deleteTask':
+                            real_id = temp_id_map.get(entity_id, entity_id)
+                            if real_id > 0:
+                                Task.objects.get(id=real_id).delete()
+                            job_result.update(status="ok", realId=real_id)
                             
                         else: raise Exception(f"Nieznana akcja: {action}")
                     except IntegrityError as e: logger.warning(f"Błąd walidacji {job}: {str(e)}"); job_result.update(status="error", error=f"Błąd walidacji: {str(e)}")
-                    # === POPRAWKA: Usunięto CowDocument.DoesNotExist ===
-                    except Cow.DoesNotExist as e: 
+                    except (Cow.DoesNotExist, CowDocument.DoesNotExist, Task.DoesNotExist) as e: 
                         logger.warning(f"Nie znaleziono obiektu {job}: {str(e)}"); job_result.update(status="error", error=str(e))
                     except Exception as e: logger.error(f"Błąd przetwarzania zadania {job}: {str(e)}"); job_result.update(status="error", error=str(e))
                     results.append(job_result)
@@ -96,7 +127,7 @@ class UserViewSet(viewsets.ModelViewSet):
             serializer.save(); return Response({'status': 'hasło zmienione pomyślnie'})
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-# === CowViewSet (Z POPRAWIONĄ AKCJĄ 'stats') ===
+# === CowViewSet (POPRAWIONE AKCJE 'stats' i 'pedigree') ===
 class CowViewSet(viewsets.ModelViewSet):
     queryset = Cow.objects.all().order_by('-created_at') 
     permission_classes = [IsAuthenticated] 
@@ -110,6 +141,7 @@ class CowViewSet(viewsets.ModelViewSet):
     def get_serializer_class(self):
         if self.action in ['create', 'update', 'partial_update']: return CowCreateUpdateSerializer
         if self.action == 'list': return CowListSerializer
+        if self.action == 'retrieve': return CowSerializer
         return CowSerializer 
     def get_serializer_context(self):
         context = super().get_serializer_context(); context.update({'request': self.request}); return context
@@ -138,59 +170,27 @@ class CowViewSet(viewsets.ModelViewSet):
             cow = Cow.objects.get(tag_id=tag_id); serializer = CowSerializer(cow, context=self.get_serializer_context()); return Response(serializer.data)
         except Cow.DoesNotExist:
             return Response({'error': f'Krowa z tag_id "{tag_id}" nie została znaleziona'}, status=status.HTTP_404_NOT_FOUND)
-    
-    # === AKCJA 'stats' (DLA DASHBOARDU) ===
     @action(detail=False, methods=['get'])
     def stats(self, request):
-        today = date.today()
-        # Filtrujemy tylko aktywne krowy
-        active_cows = Cow.objects.filter(status='ACTIVE')
-        
-        # 1. Podstawowe statystyki
-        total = active_cows.count()
-        by_gender = active_cows.values('gender').annotate(count=Count('id'))
-        
-        # 2. Histogram wieku
-        age_bins = {'0-1': 0, '1-2': 0, '2-5': 0, '5-8': 0, '8+': 0}
-        avg_age_sum = 0
+        today = date.today(); active_cows = Cow.objects.filter(status='ACTIVE')
+        total = active_cows.count(); by_gender = active_cows.values('gender').annotate(count=Count('id'))
+        age_bins = {'0-1': 0, '1-2': 0, '2-5': 0, '5-8': 0, '8+': 0}; avg_age_sum = 0
         for cow in active_cows:
-            age = today.year - cow.birth_date.year - ((today.month, today.day) < (cow.birth_date.month, cow.birth_date.day))
-            avg_age_sum += age
+            age = today.year - cow.birth_date.year - ((today.month, today.day) < (cow.birth_date.month, cow.birth_date.day)); avg_age_sum += age
             if age <= 1: age_bins['0-1'] += 1
             elif age <= 2: age_bins['1-2'] += 1
             elif age <= 5: age_bins['2-5'] += 1
             elif age <= 8: age_bins['5-8'] += 1
             else: age_bins['8+'] += 1
-        
         avg_age = (avg_age_sum / total) if total > 0 else 0
-        
-        age_histogram_data = [
-            {"name": "0-1 lat", "ilość": age_bins['0-1']},
-            {"name": "1-2 lat", "ilość": age_bins['1-2']},
-            {"name": "2-5 lat", "ilość": age_bins['2-5']},
-            {"name": "5-8 lat", "ilość": age_bins['5-8']},
-            {"name": "8+ lat", "ilość": age_bins['8+']},
-        ]
-        
-        # 3. Nadchodzące zdarzenia (z 7 dni)
+        age_histogram_data = [ {"name": "0-1 lat", "ilość": age_bins['0-1']}, {"name": "1-2 lat", "ilość": age_bins['1-2']}, {"name": "2-5 lat", "ilość": age_bins['2-5']}, {"name": "5-8 lat", "ilość": age_bins['5-8']}, {"name": "8+ lat", "ilość": age_bins['8+']}, ]
         next_7_days = today + timedelta(days=7)
-        upcoming_events_qs = Event.objects.filter(
-            cow__status='ACTIVE',
-            date__gte=today, 
-            date__lte=next_7_days
-        ).order_by('date')
-        
-        # Używamy get_serializer_context, aby przekazać 'request'
-        upcoming_events_data = EventSerializer(upcoming_events_qs, many=True, context=self.get_serializer_context()).data
-        
+        upcoming_tasks_qs = Task.objects.filter(is_completed=False, due_date__gte=today, due_date__lte=next_7_days).order_by('due_date')
+        upcoming_tasks_data = TaskSerializer(upcoming_tasks_qs, many=True, context={'request': request}).data
         return Response({
-            'total_active': total,
-            'by_gender': list(by_gender),
-            'average_age': round(avg_age, 1),
-            'age_histogram': age_histogram_data,
-            'upcoming_events': upcoming_events_data
+            'total_active': total, 'by_gender': list(by_gender), 'average_age': round(avg_age, 1),
+            'age_histogram': age_histogram_data, 'upcoming_events': upcoming_tasks_data
         })
-    
     @action(detail=True, methods=['post'], parser_classes=[MultiPartParser, FormParser])
     def upload_photo(self, request, pk=None):
         cow = self.get_object()
@@ -200,6 +200,15 @@ class CowViewSet(viewsets.ModelViewSet):
         cow.save()
         serializer = CowSerializer(cow, context=self.get_serializer_context())
         return Response(serializer.data)
+    @action(detail=True, methods=['get'])
+    def pedigree(self, request, pk=None):
+        try: cow = self.get_object()
+        except Cow.DoesNotExist: return Response({"error": "Krowa nie znaleziona"}, status=status.HTTP_4LET_FOUND)
+        context = {'request': request} 
+        ancestors_serializer = CowPedigreeSerializer(cow, context=context)
+        offspring_qs = Cow.objects.filter(Q(dam=cow) | Q(sire=cow)).distinct()
+        offspring_serializer = CowOffspringSerializer(offspring_qs, many=True, context=context)
+        return Response({ "ancestors": ancestors_serializer.data, "offspring": offspring_serializer.data })
 
 # === EventViewSet (BEZ ZMIAN) ===
 class EventViewSet(viewsets.ModelViewSet):
@@ -213,5 +222,35 @@ class EventViewSet(viewsets.ModelViewSet):
     def get_serializer_context(self):
         context = super().get_serializer_context(); context.update({'request': self.request}); return context
 
-# === CowDocumentViewSet (USUNIĘTY) ===
-# ...
+# === NOWY VIEWSET: DOKUMENTY ===
+class CowDocumentViewSet(viewsets.ModelViewSet):
+    queryset = CowDocument.objects.all()
+    serializer_class = CowDocumentSerializer
+    permission_classes = [IsAuthenticated]
+    parser_classes = (MultiPartParser, FormParser, JSONParser) 
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['cow']
+    def get_serializer_context(self):
+        context = super().get_serializer_context(); context.update({'request': self.request}); return context
+    def create(self, request, *args, **kwargs):
+        if 'file' not in request.FILES: return Response({"error": "Brak pliku 'file'."}, status=status.HTTP_400_BAD_REQUEST)
+        if 'cow' not in request.data: return Response({"error": "Brak 'cow' ID."}, status=status.HTTP_400_BAD_REQUEST)
+        file_obj = request.FILES['file']; title = request.data.get('title', file_obj.name)
+        data = {'cow': request.data.get('cow'), 'title': title, 'file': file_obj}
+        serializer = self.get_serializer(data=data); serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
+# === TaskViewSet (BEZ ZMIAN) ===
+class TaskViewSet(viewsets.ModelViewSet):
+    queryset = Task.objects.all()
+    serializer_class = TaskSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter, filters.SearchFilter]
+    filterset_fields = { 'cow': ['exact'], 'is_completed': ['exact'], 'due_date': ['gte', 'lte'], 'task_type': ['exact'], }
+    search_fields = ['title', 'notes', 'cow__name', 'cow__tag_id']
+    ordering_fields = ['due_date', 'created_at']
+    ordering = ['due_date'] 
+    def get_serializer_context(self):
+        context = super().get_serializer_context(); context.update({'request': self.request}); return context

@@ -6,6 +6,8 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Select } from './ui/select';
 import { Loader2, X, Upload } from 'lucide-react';
+import { useLiveQuery } from 'dexie-react-hooks'; // <-- NOWY IMPORT
+import { repository } from '../services/api'; // <-- NOWY IMPORT
 
 export function CowForm({ cow, onSubmit, onCancel, loading, onPhotoChange }) {
   const [formData, setFormData] = useState({
@@ -14,12 +16,26 @@ export function CowForm({ cow, onSubmit, onCancel, loading, onPhotoChange }) {
     breed: 'Highland Cattle',
     birth_date: '',
     gender: 'F',
-    status: 'ACTIVE', // <-- NOWE POLE
+    status: 'ACTIVE',
+    dam: '', // <-- NOWE POLE (ID)
+    sire: '', // <-- NOWE POLE (ID)
   });
   const [errors, setErrors] = useState({});
   
   const [photoFile, setPhotoFile] = useState(null);
   const [photoPreview, setPhotoPreview] = useState(null);
+
+  // === NOWOŚĆ: Pobierz listę potencjalnych rodziców z Dexie ===
+  const potentialParents = useLiveQuery(
+    () => repository.getPotentialParentsQuery(),
+    [], // Zależności
+    []  // Wartość początkowa
+  );
+  
+  // Filtruj rodziców na samce i samice
+  const potentialDams = potentialParents.filter(p => p.gender === 'F' && p.id !== cow?.id);
+  const potentialSires = potentialParents.filter(p => p.gender === 'M' && p.id !== cow?.id);
+  // =========================================================
 
   useEffect(() => {
     if (cow) {
@@ -29,24 +45,20 @@ export function CowForm({ cow, onSubmit, onCancel, loading, onPhotoChange }) {
         breed: cow.breed || 'Highland Cattle',
         birth_date: cow.birth_date ? new Date(cow.birth_date).toISOString().split('T')[0] : '',
         gender: cow.gender || 'F',
-        status: cow.status || 'ACTIVE', // <-- DODANE
+        status: cow.status || 'ACTIVE',
+        dam: cow.dam || '',
+        sire: cow.sire || '',
       });
       setPhotoPreview(cow.photo || null);
     } else {
       setFormData({
-        tag_id: '',
-        name: '',
-        breed: 'Highland Cattle',
-        birth_date: '',
-        gender: 'F',
-        status: 'ACTIVE', // <-- DODANE
+        tag_id: '', name: '', breed: 'Highland Cattle', birth_date: '',
+        gender: 'F', status: 'ACTIVE', dam: '', sire: '',
       });
       setPhotoPreview(null);
     }
     setPhotoFile(null); 
-    if(onPhotoChange) {
-        onPhotoChange(null);
-    }
+    if(onPhotoChange) { onPhotoChange(null); }
   }, [cow]); 
 
   useEffect(() => {
@@ -59,11 +71,7 @@ export function CowForm({ cow, onSubmit, onCancel, loading, onPhotoChange }) {
     } else {
       setPhotoPreview(null);
     }
-    return () => {
-      if (objectUrl) {
-        URL.revokeObjectURL(objectUrl);
-      }
-    };
+    return () => { if (objectUrl) { URL.revokeObjectURL(objectUrl); }};
   }, [photoFile, cow]); 
 
 
@@ -77,6 +85,10 @@ export function CowForm({ cow, onSubmit, onCancel, loading, onPhotoChange }) {
       const today = new Date();
       today.setHours(0, 0, 0, 0); 
       if (birthDate > today) newErrors.birth_date = 'Data urodzenia nie może być w przyszłości';
+    }
+    // Walidacja rodowodu
+    if (formData.dam && formData.dam === formData.sire) {
+      newErrors.dam = 'Matka i ojciec nie mogą być tą samą krową.';
     }
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -102,21 +114,17 @@ export function CowForm({ cow, onSubmit, onCancel, loading, onPhotoChange }) {
     if (file && file.type.startsWith('image/')) {
       setPhotoFile(file);
       onPhotoChange(file); 
-    } else {
-      e.target.value = null; 
-    }
+    } else { e.target.value = null; }
   };
 
   const handleRemovePhoto = () => {
-    setPhotoFile(null);
-    setPhotoPreview(null); 
-    onPhotoChange(null);
+    setPhotoFile(null); setPhotoPreview(null); onPhotoChange(null);
   };
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4 max-h-[70vh] overflow-y-auto pr-2">
       
-      {/* Podgląd zdjęcia */}
+      {/* Podgląd zdjęcia (bez zmian) */}
       <div className="w-full h-48 rounded-lg bg-gray-100 flex items-center justify-center relative border border-dashed">
         {photoPreview ? (
           <>
@@ -135,24 +143,21 @@ export function CowForm({ cow, onSubmit, onCancel, loading, onPhotoChange }) {
         )}
       </div>
       
-      {/* Input pliku */}
+      {/* Input pliku (bez zmian) */}
       <div>
         <Label htmlFor="photo">Zmień/dodaj zdjęcie</Label>
-        <Input
-          id="photo" name="photo" type="file" accept="image/png, image/jpeg, image/webp"
+        <Input id="photo" name="photo" type="file" accept="image/png, image/jpeg, image/webp"
           onChange={handlePhotoChange} disabled={loading}
           className="file:text-emerald-700 file:font-semibold hover:file:bg-emerald-50 cursor-pointer"
         />
       </div>
 
       <div className="grid grid-cols-2 gap-4">
-        {/* Tag ID */}
         <div>
           <Label htmlFor="tag_id">Numer kolczyka *</Label>
           <Input id="tag_id" name="tag_id" value={formData.tag_id} onChange={handleChange} placeholder="np. PL001" disabled={loading} />
           {errors.tag_id && (<p className="text-sm text-red-600 mt-1">{errors.tag_id}</p>)}
         </div>
-        {/* Name */}
         <div>
           <Label htmlFor="name">Imię *</Label>
           <Input id="name" name="name" value={formData.name} onChange={handleChange} placeholder="np. Bella" disabled={loading} />
@@ -161,13 +166,11 @@ export function CowForm({ cow, onSubmit, onCancel, loading, onPhotoChange }) {
       </div>
 
       <div className="grid grid-cols-2 gap-4">
-        {/* Birth Date */}
         <div>
           <Label htmlFor="birth_date">Data urodzenia *</Label>
           <Input id="birth_date" name="birth_date" type="date" value={formData.birth_date} onChange={handleChange} disabled={loading} />
           {errors.birth_date && (<p className="text-sm text-red-600 mt-1">{errors.birth_date}</p>)}
         </div>
-        {/* Breed */}
         <div>
           <Label htmlFor="breed">Rasa</Label>
           <Input id="breed" name="breed" value={formData.breed} onChange={handleChange} placeholder="Highland Cattle" disabled={loading} />
@@ -175,7 +178,6 @@ export function CowForm({ cow, onSubmit, onCancel, loading, onPhotoChange }) {
       </div>
 
       <div className="grid grid-cols-2 gap-4">
-        {/* Gender */}
         <div>
           <Label htmlFor="gender">Płeć *</Label>
           <Select id="gender" name="gender" value={formData.gender} onChange={handleChange} disabled={loading}>
@@ -183,8 +185,6 @@ export function CowForm({ cow, onSubmit, onCancel, loading, onPhotoChange }) {
             <option value="M">Samiec (♂)</option>
           </Select>
         </div>
-        
-        {/* === NOWE POLE: STATUS === */}
         <div>
           <Label htmlFor="status">Status *</Label>
           <Select id="status" name="status" value={formData.status} onChange={handleChange} disabled={loading}>
@@ -194,8 +194,36 @@ export function CowForm({ cow, onSubmit, onCancel, loading, onPhotoChange }) {
           </Select>
         </div>
       </div>
+      
+      {/* === NOWE POLA RODOWODU === */}
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <Label htmlFor="dam">Matka (Dam)</Label>
+          <Select id="dam" name="dam" value={formData.dam} onChange={handleChange} disabled={loading}>
+            <option value="">-- Brak / Nieznana --</option>
+            {potentialDams.map(d => (
+              <option key={d.id} value={d.id}>
+                {d.name} ({d.tag_id})
+              </option>
+            ))}
+          </Select>
+          {errors.dam && (<p className="text-sm text-red-600 mt-1">{errors.dam}</p>)}
+        </div>
+        <div>
+          <Label htmlFor="sire">Ojciec (Sire)</Label>
+          <Select id="sire" name="sire" value={formData.sire} onChange={handleChange} disabled={loading}>
+            <option value="">-- Brak / Nieznany --</option>
+            {potentialSires.map(s => (
+              <option key={s.id} value={s.id}>
+                {s.name} ({s.tag_id})
+              </option>
+            ))}
+          </Select>
+        </div>
+      </div>
+      {/* ========================== */}
 
-      {/* Buttons */}
+      {/* Buttons (bez zmian) */}
       <div className="flex gap-3 pt-4 sticky bottom-0 bg-card py-2 -mx-2 px-2">
         <Button type="submit" disabled={loading} className="flex-1">
           {loading ? (<><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Zapisywanie...</>) 

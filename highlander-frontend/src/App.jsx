@@ -7,7 +7,8 @@ import { LoginPage } from './pages/LoginPage';
 import { ProtectedRoute } from './components/ProtectedRoute'; 
 import { AdminRoute } from './components/AdminRoute'; 
 import { UserManagementPage } from './pages/UserManagementPage'; 
-import { DashboardPage } from './pages/DashboardPage'; // <-- IMPORT DASHBOARDU
+import { DashboardPage } from './pages/DashboardPage';
+import { CalendarPage } from './pages/CalendarPage';
 import { NavBar } from './components/NavBar';
 import { Button } from './components/ui/button';
 import { Plus } from 'lucide-react';
@@ -16,22 +17,30 @@ import { ReloadPrompt } from './components/ReloadPrompt';
 import { useAuth } from './contexts/AuthContext';
 import { Toaster } from './components/ui/sonner'; 
 import { ModeToggle } from './components/ModeToggle'; 
+import { cn } from './lib/utils'; 
 
 // Komponent Głównego Layoutu
 function MainLayout() {
-  // Przycisk "Dodaj Krowę" został przeniesiony do CowListPage
-  // Ten layout jest teraz "głupszy"
+  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const openAddDialog = () => setIsAddDialogOpen(true);
   const location = useLocation();
-  const isExcludedPage = location.pathname.startsWith('/cow/') || location.pathname.startsWith('/admin');
+  const showAddButton = location.pathname === '/herd'; 
+  
+  // === POPRAWKA BŁĘDU ===
+  // Usunęliśmy `|| location.pathname.startsWith('/admin')`
+  // Strona admina POWINNA używać tego layoutu.
+  const isDetailPage = location.pathname.startsWith('/cow/');
 
-  if (isExcludedPage) {
+  if (isDetailPage) {
+    // Tylko strona szczegółów jest renderowana bez layoutu
     return <Outlet />; 
   }
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      {/* Header */}
-      <div className="bg-background/80 backdrop-blur-sm border-b border-border sticky top-0 z-10">
+    <div className={cn("min-h-screen text-foreground", 
+        location.pathname === '/' ? 'bg-background' : 'bg-stone-50 dark:bg-stone-950'
+    )}>
+      <div className="bg-card/80 backdrop-blur-sm border-b border-border sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
             <div>
@@ -41,18 +50,20 @@ function MainLayout() {
               <p className="text-muted-foreground mt-1">Zarządzanie stadem krów Highland Cattle</p>
             </div>
             <div className="flex items-center gap-4 w-full sm:w-auto">
-              {/* Przycisk "Dodaj" został przeniesiony */}
+              {showAddButton && (
+                <Button onClick={openAddDialog} className="w-full sm:w-auto hidden sm:flex shadow-sm hover:scale-105 transition-transform">
+                  <Plus className="w-4 h-4 mr-2" />
+                  Dodaj krowę
+                </Button>
+              )}
               <ModeToggle /> 
             </div>
           </div>
         </div>
       </div>
-
-      {/* ZMIANA: context jest już niepotrzebny */}
       <main className="pb-20"> 
-        <Outlet />
+        <Outlet context={{ isAddDialogOpen, setIsAddDialogOpen, openAddDialog }} />
       </main>
-
       <div>
         <NavBar />
       </div>
@@ -69,18 +80,19 @@ function App() {
         <Route path="/login" element={<LoginPage />} />
         
         <Route element={<ProtectedRoute />}>
-          {/* === ZMIANA ROUTINGU === */}
+          {/* === POPRAWKA: Wszystkie trasy admina są teraz w MainLayout === */}
           <Route path="/" element={<MainLayout />}>
-            <Route index element={<DashboardPage />} /> {/* <-- Dashboard jest teraz stroną główną */}
-            <Route path="herd" element={<CowListPage />} /> {/* <-- Lista krów jest na /herd */}
+            <Route index element={<DashboardPage />} />
+            <Route path="herd" element={<CowListPage />} />
+            <Route path="calendar" element={<CalendarPage />} />
             <Route path="scan" element={<ScannerPage />} />
+            
+            <Route path="/admin" element={<AdminRoute />}>
+              <Route path="users" element={<UserManagementPage />} />
+            </Route>
           </Route>
           
           <Route path="cow/:id" element={<CowDetailPage />} />
-          
-          <Route path="/admin" element={<AdminRoute />}>
-            <Route path="users" element={<UserManagementPage />} />
-          </Route>
         </Route>
         
         <Route path="*" element={isLoggedIn ? <Navigate to="/" /> : <Navigate to="/login" />} />
@@ -91,5 +103,4 @@ function App() {
     </>
   );
 }
-
 export default App
