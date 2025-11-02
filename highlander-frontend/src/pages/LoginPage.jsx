@@ -7,30 +7,26 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Alert, AlertDescription } from '../components/ui/alert';
 import { Loader2, AlertCircle, Eye, EyeOff } from 'lucide-react';
-import { toast } from 'sonner'; // <-- IMPORT TOAST
+import { toast } from 'sonner'; 
 
 export function LoginPage() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  // const [error, setError] = useState(null); // Usunięte
-
+  
   const navigate = useNavigate();
   const { login, isLoggedIn } = useAuth();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    // setError(null);
     setLoading(true);
-
     try {
       await login(username, password);
       toast.success('Zalogowano pomyślnie!');
       navigate('/', { replace: true });
     } catch (err) {
-      // setError(err.message);
-      toast.error(err.message); // <-- UŻYJ TOAST
+      toast.error(err.message);
     } finally {
       setLoading(false);
     }
@@ -41,7 +37,8 @@ export function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4">
+    // === ZMIANA: Ładny gradient tła ===
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-emerald-50 via-green-50 to-teal-100 dark:from-stone-900 dark:via-emerald-950 dark:to-stone-950 p-4">
       <div className="w-full max-w-md bg-card p-8 rounded-lg shadow-xl border border-border">
         <div className="text-center mb-6">
           <h1 className="text-3xl font-bold text-foreground flex items-center justify-center gap-3">
@@ -51,8 +48,6 @@ export function LoginPage() {
         </div>
         
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Usunęliśmy stary Alert, błędy pokazuje toast */}
-          
           <div>
             <Label htmlFor="username">Nazwa użytkownika</Label>
             <Input
@@ -89,7 +84,8 @@ export function LoginPage() {
             </button>
           </div>
           
-          <Button type="submit" className="w-full" disabled={loading}>
+          {/* === ZMIANA: Ładniejszy przycisk === */}
+          <Button type="submit" className="w-full shadow-sm hover:scale-[1.02] transition-transform" disabled={loading}>
             {loading ? (
               <Loader2 className="w-5 h-5 animate-spin mr-2" />
             ) : (

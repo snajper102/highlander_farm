@@ -20,6 +20,10 @@ const authedFetch = async (url, options = {}) => {
   return response;
 };
 const handleResponse = async (response) => {
+  // Dla pobierania plików (export)
+  if (response.ok && response.headers.get('Content-Type')?.includes('spreadsheet')) {
+    return response.blob();
+  }
   if (!response.ok) {
     let errorData;
     try { errorData = await response.json(); } catch (e) {
@@ -42,13 +46,29 @@ const handleResponse = async (response) => {
 };
 
 export const networkApi = {
-  // === NOWY ENDPOINT ===
   getStats: async () => handleResponse(await authedFetch(`${API_BASE_URL}/cows/stats/`)),
-  
   getCows: async () => handleResponse(await authedFetch(`${API_BASE_URL}/cows/`)),
   getCow: async (id) => handleResponse(await authedFetch(`${API_BASE_URL}/cows/${id}/`)),
   searchCow: async (tagId) => handleResponse(await authedFetch(`${API_BASE_URL}/cows/search/?tag_id=${tagId}`)),
   getEventsForCow: async (cowId) => handleResponse(await authedFetch(`${API_BASE_URL}/events/?cow=${cowId}`)),
+  getTasks: async (filters = {}) => {
+    const params = new URLSearchParams();
+    if (filters.start) params.append('due_date__gte', filters.start);
+    if (filters.end) params.append('due_date__lte', filters.end);
+    if (filters.cow) params.append('cow', filters.cow);
+    if (filters.is_completed) params.append('is_completed', filters.is_completed);
+    return handleResponse(await authedFetch(`${API_BASE_URL}/tasks/?${params.toString()}`));
+  },
+  getPedigree: async (id) => handleResponse(await authedFetch(`${API_BASE_URL}/cows/${id}/pedigree/`)),
+  getDocuments: async (cowId) => handleResponse(await authedFetch(`${API_BASE_URL}/documents/?cow=${cowId}`)),
+  getHerds: async () => handleResponse(await authedFetch(`${API_BASE_URL}/herds/`)),
+  importExcel: async (file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return handleResponse(await authedFetch(`${API_BASE_URL}/cows/import-excel/`, { method: 'POST', body: formData }));
+  },
+  exportExcel: async () => handleResponse(await authedFetch(`${API_BASE_URL}/cows/export-excel/`)),
+  
   createCow: async (data) => handleResponse(await authedFetch(`${API_BASE_URL}/cows/`, { method: 'POST', body: JSON.stringify(data) })),
   updateCow: async (id, data) => handleResponse(await authedFetch(`${API_BASE_URL}/cows/${id}/`, { method: 'PATCH', body: JSON.stringify(data) })),
   deleteCow: async (id) => {
@@ -60,7 +80,15 @@ export const networkApi = {
     const formData = new FormData(); formData.append('photo', file);
     return handleResponse(await authedFetch(`${API_BASE_URL}/cows/${id}/upload_photo/`, { method: 'POST', body: formData }));
   },
+  deleteDocument: async (id) => handleResponse(await authedFetch(`${API_BASE_URL}/documents/${id}/`, { method: 'DELETE' })),
+  uploadDocument: async (cowId, title, file) => {
+    const formData = new FormData(); formData.append('cow', cowId); formData.append('title', title); formData.append('file', file);
+    return handleResponse(await authedFetch(`${API_BASE_URL}/documents/`, { method: 'POST', body: formData }));
+  },
   createEvent: async (data) => handleResponse(await authedFetch(`${API_BASE_URL}/events/`, { method: 'POST', body: JSON.stringify(data) })),
+  createTask: async (data) => handleResponse(await authedFetch(`${API_BASE_URL}/tasks/`, { method: 'POST', body: JSON.stringify(data) })),
+  updateTask: async (id, data) => handleResponse(await authedFetch(`${API_BASE_URL}/tasks/${id}/`, { method: 'PATCH', body: JSON.stringify(data) })),
+  deleteTask: async (id) => handleResponse(await authedFetch(`${API_BASE_URL}/tasks/${id}/`, { method: 'DELETE' })),
   syncBatch: async (jobs) => {
     const response = await authedFetch(`${API_BASE_URL}/sync/`, { method: 'POST', body: JSON.stringify({ jobs }) });
     const data = await response.json();
@@ -89,7 +117,7 @@ export const syncService = {
       const { status, results } = await networkApi.syncBatch(jobs); 
       if (status !== 'ok') { throw new Error("Odpowiedź serwera synchronizacji nie jest 'ok'"); }
       console.log("Otrzymano wyniki synchronizacji:", results);
-      await db.transaction('rw', db.cows, db.events, db.syncQueue, async () => {
+      await db.transaction('rw', db.cows, db.events, db.tasks, db.documents, db.syncQueue, async () => {
         for (const result of results) {
           const originalJob = jobs.find(j => j.id === result.queueId);
           if (!originalJob) continue;
@@ -98,10 +126,16 @@ export const syncService = {
               await db.cows.update(result.tempId, { id: result.realId });
               await db.syncQueue.where('payload.cow').equals(result.tempId).modify({ 'payload.cow': result.realId });
               await db.events.where('cow').equals(result.tempId).modify({ cow: result.realId });
+              await db.tasks.where('cow').equals(result.tempId).modify({ cow: result.realId });
+              await db.documents.where('cow').equals(result.tempId).modify({ cow: result.realId });
             }
             if (result.action === 'createEvent' && result.realId) {
               await db.events.update(result.tempId, { id: result.realId });
             }
+            if (result.action === 'createTask' && result.realId) {
+              await db.tasks.update(result.tempId, { id: result.realId });
+            }
+            if (result.action === 'deleteDocument') {}
             await db.syncQueue.delete(originalJob.id);
           } else {
             console.error(`Błąd synchronizacji zadania: ${result.error}`);
@@ -136,26 +170,63 @@ export const syncService = {
   }
 };
 
-// === WARSTWA REPOZYTORIUM (BEZ ZMIAN) ===
+// === WARSTWA REPOZYTORIUM (ZAKTUALIZOWANA) ===
 export const repository = {
-  getCowsQuery: (status = 'ACTIVE') => {
-    if (status === 'ALL') { return db.cows.orderBy('name').toArray(); }
-    return db.cows.where('status').equals(status).sortBy('name');
+  // Zapytania
+  getCowsQuery: (status = 'ACTIVE', herd = 'ALL') => { 
+    let query = db.cows;
+    if (status !== 'ALL') query = query.where('status').equals(status);
+    if (herd !== 'ALL') query = query.where('herd').equals(parseInt(herd, 10));
+    return query.toArray(async (cows) => {
+      const damIds = [...new Set(cows.map(c => c.dam).filter(Boolean))];
+      const sireIds = [...new Set(cows.map(c => c.sire).filter(Boolean))];
+      const herdIds = [...new Set(cows.map(c => c.herd).filter(Boolean))];
+      const parents = await db.cows.where('id').anyOf([...damIds, ...sireIds]).toArray();
+      const herds = await db.herds.where('id').anyOf(herdIds).toArray();
+      const parentsMap = new Map(parents.map(p => [p.id, p.name]));
+      const herdsMap = new Map(herds.map(h => [h.id, h.name]));
+      return cows.map(cow => ({
+        ...cow,
+        dam_name: parentsMap.get(cow.dam) || null,
+        sire_name: parentsMap.get(cow.sire) || null,
+        herd_name: herdsMap.get(cow.herd) || null,
+      })).sort((a, b) => a.tag_id.localeCompare(b.tag_id));
+    });
   },
+  getHerdsQuery: () => db.herds.orderBy('name').toArray(), 
+  getPotentialParentsQuery: () => db.cows.where('status').equals('ACTIVE').toArray(),
   getCowQuery: (id) => db.cows.get(parseInt(id, 10)),
   getEventsQuery: (cowId) => db.events.where('cow').equals(parseInt(cowId, 10)).reverse().sortBy('date'),
+  getTasksQuery: (filters = {}) => {
+    let query = db.tasks;
+    if (filters.cow) query = query.where('cow').equals(parseInt(filters.cow, 10));
+    if (filters.is_completed !== undefined) query = query.where('is_completed').equals(filters.is_completed);
+    return query.reverse().sortBy('due_date');
+  },
+  getTasksForCalendarQuery: () => db.tasks.toArray(),
+  getPedigree: networkApi.getPedigree,
+  getDocumentsQuery: (cowId) => db.documents.where('cow').equals(parseInt(cowId, 10)).sortBy('uploaded_at'),
+  
+  // Synchronizacje
   syncCows: () => networkApi.getCows().then(d => db.cows.bulkPut(d)).catch(e => console.warn("Sync: Jesteś offline (Cows)", e.message)),
+  syncHerds: () => networkApi.getHerds().then(d => db.herds.bulkPut(d)).catch(e => console.warn("Sync: Jesteś offline (Herds)", e.message)),
   syncCow: (id) => networkApi.getCow(id).then(d => db.cows.put(d)).catch(e => console.warn("Sync: Jesteś offline (Cow)", e.message)),
   syncEvents: (cowId) => networkApi.getEventsForCow(cowId).then(d => db.transaction('rw', db.events, async () => { await db.events.where('cow').equals(cowId).delete(); await db.events.bulkPut(d); })).catch(e => console.warn("Sync: Jesteś offline (Events)", e.message)),
+  syncTasks: (filters = {}) => networkApi.getTasks({ is_completed: 'false' }).then(d => db.tasks.bulkPut(d)).catch(e => console.warn("Sync: Jesteś offline (Tasks)", e.message)),
+  syncDocuments: (cowId) => networkApi.getDocuments(cowId).then(d => db.transaction('rw', db.documents, async () => { await db.documents.where('cow').equals(cowId).delete(); await db.documents.bulkPut(d); })).catch(e => console.warn("Sync: Jesteś offline (Documents)", e.message)), 
+
   searchCow: networkApi.searchCow,
+  
+  // Operacje zapisu (ZAKTUALIZOWANE)
   createCow: async (data) => {
+    const payload = { ...data, dam: data.dam || null, sire: data.sire || null, herd: data.herd || null };
     if (navigator.onLine) {
-      try { const realCow = await networkApi.createCow(data); await db.cows.put(realCow); toast.success(`Krowa ${realCow.name} dodana.`); return realCow;
+      try { const realCow = await networkApi.createCow(payload); await db.cows.put(realCow); toast.success(`Krowa ${realCow.name} dodana.`); return realCow;
       } catch(e) { toast.error(`Błąd: ${e.message}`); throw e; }
     } else {
-      const existing = await db.cows.where('tag_id').equals(data.tag_id).first();
-      if (existing) { toast.error(`Krowa z tagiem ${data.tag_id} już istnieje lokalnie.`); throw new Error(`Krowa z tagiem ${data.tag_id} już istnieje lokalnie.`); }
-      const tempId = -(Date.now()); const optimisticCow = { ...data, id: tempId, photo: null, status: 'ACTIVE' }; 
+      const existing = await db.cows.where('tag_id').equals(payload.tag_id).first();
+      if (existing) { toast.error(`Krowa z tagiem ${payload.tag_id} już istnieje lokalnie.`); throw new Error(`Krowa z tagiem ${payload.tag_id} już istnieje lokalnie.`); }
+      const tempId = -(Date.now()); const optimisticCow = { ...payload, id: tempId, photo: null }; 
       await db.cows.put(optimisticCow);
       await db.syncQueue.add({ action: 'createCow', tempId: tempId, payload: optimisticCow });
       toast.warning(`Krowa ${optimisticCow.name} dodana offline.`);
@@ -163,18 +234,19 @@ export const repository = {
     }
   },
   updateCow: async (id, data) => {
+    const payload = { ...data, dam: data.dam || null, sire: data.sire || null, herd: data.herd || null };
     if (navigator.onLine) {
-      const updatedCow = await networkApi.updateCow(id, data);
+      const updatedCow = await networkApi.updateCow(id, payload);
       await db.cows.put(updatedCow);
       toast.success(`Krowa ${updatedCow.name} zaktualizowana.`);
       return updatedCow;
     } else {
-      if (data.tag_id) {
-          const existing = await db.cows.where('tag_id').equals(data.tag_id).first();
-          if (existing && existing.id !== id) { toast.error(`Tag ${data.tag_id} już istnieje lokalnie.`); throw new Error(`Tag ${data.tag_id} już istnieje lokalnie.`);}
+      if (payload.tag_id) {
+          const existing = await db.cows.where('tag_id').equals(payload.tag_id).first();
+          if (existing && existing.id !== id) { toast.error(`Tag ${payload.tag_id} już istnieje lokalnie.`); throw new Error(`Tag ${payload.tag_id} już istnieje lokalnie.`);}
       }
-      await db.cows.update(id, data);
-      await db.syncQueue.add({ action: 'updateCow', entityId: id, payload: data });
+      await db.cows.update(id, payload);
+      await db.syncQueue.add({ action: 'updateCow', entityId: id, payload: payload });
       toast.warning(`Krowa zaktualizowana offline.`);
     }
   },
@@ -204,6 +276,81 @@ export const repository = {
       return optimisticEvent;
     }
   },
+  createTask: async (data) => {
+    const payload = { ...data, cow: data.cow || null };
+    if (navigator.onLine) {
+      if (payload.cow < 0) { toast.error("Zsynchronizuj krowę przed dodaniem zadania."); throw new Error("Nie można dodać zadania online do krowy, która jest offline."); }
+      const newTask = await networkApi.createTask(payload);
+      await db.tasks.put(newTask);
+      toast.success(`Zadanie "${newTask.title}" dodane.`);
+      return newTask;
+    } else {
+      const tempId = -(Date.now()); const optimisticTask = { ...payload, id: tempId, is_completed: false };
+      await db.tasks.put(optimisticTask);
+      await db.syncQueue.add({ action: 'createTask', tempId: tempId, payload: optimisticTask });
+      toast.warning(`Zadanie "${optimisticTask.title}" dodane offline.`);
+      return optimisticTask;
+    }
+  },
+  updateTask: async (id, data) => {
+    const payload = { ...data };
+    if (navigator.onLine) {
+      const updatedTask = await networkApi.updateTask(id, payload);
+      await db.tasks.put(updatedTask);
+      toast.success(`Zadanie "${updatedTask.title}" zaktualizowane.`);
+      return updatedTask;
+    } else {
+      await db.tasks.update(id, payload);
+      await db.syncQueue.add({ action: 'updateTask', entityId: id, payload: payload });
+      toast.warning(`Zadanie zaktualizowane offline.`);
+    }
+  },
+  deleteTask: async (id) => {
+    await db.tasks.delete(id);
+    if (navigator.onLine) {
+      try { await networkApi.deleteTask(id); toast.success("Zadanie usunięte.");
+      } catch (e) { toast.warning(`Błąd serwera przy usuwaniu zadania: ${e.message}`); }
+    } else {
+      toast.warning(`Zadanie usunięte offline.`);
+      if (id > 0) { await db.syncQueue.add({ action: 'deleteTask', entityId: id }); }
+    }
+  },
+  
+  uploadDocument: async (cowId, title, file) => {
+    if (!navigator.onLine) { throw new Error("Musisz być online, aby przesłać dokumenty."); }
+    const newDoc = await networkApi.uploadDocument(cowId, title, file);
+    await db.documents.put(newDoc); 
+    toast.success(`Dokument "${newDoc.title}" przesłany.`);
+    return newDoc;
+  },
+  deleteDocument: async (id) => {
+    await db.documents.delete(id);
+    if (navigator.onLine) {
+      try { await networkApi.deleteDocument(id); toast.success("Dokument usunięty.");
+      } catch (e) { toast.warning(`Błąd serwera przy usuwaniu dokumentu: ${e.message}`); }
+    } else {
+      toast.warning(`Dokument usunięty offline.`);
+      if (id > 0) { await db.syncQueue.add({ action: 'deleteDocument', entityId: id }); }
+    }
+  },
+  
+  importExcel: networkApi.importExcel,
+  exportExcel: async () => {
+    try {
+      const blob = await networkApi.exportExcel();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = "stado_highlander_export.xlsx";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (e) {
+      toast.error(`Błąd eksportu: ${e.message}`);
+    }
+  },
+  
   uploadPhoto: networkApi.uploadPhoto,
   admin: networkApi, 
 };

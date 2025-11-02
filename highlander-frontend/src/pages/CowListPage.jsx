@@ -1,14 +1,18 @@
 // src/pages/CowListPage.jsx
 
-import { useState, useEffect, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { useOutletContext, useNavigate } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks'; 
-import { Loader2, AlertCircle, Plus, WifiOff, RefreshCw, SlidersHorizontal, ChevronDown, Search, LayoutGrid, List } from 'lucide-react';
+import { Loader2, AlertCircle, Plus, WifiOff, RefreshCw, SlidersHorizontal, ChevronDown, Search, LayoutGrid, List, Download, Upload } from 'lucide-react';
 import { Alert, AlertDescription } from '../components/ui/alert';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
-import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem } from "../components/ui/dropdown-menu"; 
+import { 
+  DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger, 
+  DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator,
+  DropdownMenuItem // <-- POPRAWKA IMPORTU
+} from "../components/ui/dropdown-menu"; 
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { CowForm } from '../components/CowForm';
 import { DeleteCowDialog } from '../components/DeleteCowDialog';
@@ -24,32 +28,37 @@ import { CowCard } from '../components/CowCard';
 
 export function CowListPage() {
   const navigate = useNavigate();
-  
-  // === STAN PRZYCISKU "DODAJ" (PRZENIESIONY Z App.jsx) ===
-  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
-  const openAddDialog = () => setIsAddDialogOpen(true);
+  const { isAddDialogOpen, setIsAddDialogOpen, openAddDialog } = useOutletContext();
   
   const [statusFilter, setStatusFilter] = useState('ACTIVE'); 
+  const [herdFilter, setHerdFilter] = useState('ALL'); 
+  
   const cows = useLiveQuery(
-    () => repository.getCowsQuery(statusFilter),
-    [statusFilter], 
+    () => repository.getCowsQuery(statusFilter, herdFilter),
+    [statusFilter, herdFilter], 
     undefined 
   );
+  const herds = useLiveQuery(() => db.herds.toArray(), [], []); 
   
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const syncQueueCount = useLiveQuery(() => db.syncQueue.count(), [], 0);
+  
   const [viewMode, setViewMode] = useState('table'); 
   const [sorting, setSorting] = useState([])
   const [columnFilters, setColumnFilters] = useState([])
   const [globalFilter, setGlobalFilter] = useState("") 
   const [columnVisibility, setColumnVisibility] = useState({})
   const [rowSelection, setRowSelection] = useState({})
+  
+  const [isImportLoading, setIsImportLoading] = useState(false);
+  const [isExportLoading, setIsExportLoading] = useState(false);
+  const fileInputRef = useRef(null);
 
-  // Efekty (bez zmian)
   useEffect(() => {
     const runSync = () => { if (navigator.onLine) syncService.processSyncQueue(); };
-    window.addEventListener('online', runSync); runSync(); repository.syncCows();
-    return () => window.removeEventListener('online', runSync);
+    window.addEventListener('online', runSync); runSync(); 
+    repository.syncCows();
+    repository.syncHerds(); 
   }, []);
   useEffect(() => {
     const handleOnline = () => setIsOnline(true); const handleOffline = () => setIsOnline(false);
@@ -64,16 +73,7 @@ export function CowListPage() {
   const [formLoading, setFormLoading] = useState(false);
   const [photoFile, setPhotoFile] = useState(null);
 
-  const closeAllDialogs = () => {
-    setIsAddDialogOpen(false); 
-    setIsEditDialogOpen(false);
-    setIsArchiveDialogOpen(false); 
-    setIsEventDialogOpen(false); 
-    setSelectedCow(null);
-    setPhotoFile(null); 
-  };
-
-  // Handlery (bez zmian)
+  const closeAllDialogs = () => { setIsAddDialogOpen(false); setIsEditDialogOpen(false); setIsArchiveDialogOpen(false); setIsEventDialogOpen(false); setSelectedCow(null); setPhotoFile(null); };
   const handleAddCow = async (formData) => {
     try { setFormLoading(true); const { photo, ...dataToSend } = formData; const newCow = await repository.createCow(dataToSend);
       if (photoFile && newCow.id && navigator.onLine) { await repository.uploadPhoto(newCow.id, photoFile); }
@@ -113,7 +113,20 @@ export function CowListPage() {
     getCoreRowModel: getCoreRowModel(), getPaginationRowModel: getPaginationRowModel(), getSortedRowModel: getSortedRowModel(), getFilteredRowModel: getFilteredRowModel(),
     onColumnVisibilityChange: setColumnVisibility, onRowSelectionChange: setRowSelection,
     state: { sorting, columnFilters, globalFilter, columnVisibility, rowSelection },
+    // === NOWOŚĆ: Ustaw domyślnie ukryte kolumny ===
+    initialState: {
+        columnVisibility: {
+            'dam_name': false,
+            'sire_name': false,
+            'passport_number': false,
+            'color': false,
+            'weight': false,
+            'pregnancy_duration': false,
+        }
+    }
   });
+  
+  // === POPRAWKA: Przeniesiono `handleGenderFilterChange` ===
   const handleGenderFilterChange = (gender, isChecked) => {
     const currentFilter = (table.getColumn('gender')?.getFilterValue() || [])
     let newFilter = [...currentFilter]
@@ -126,42 +139,96 @@ export function CowListPage() {
     if (count > 1 && count < 5) return 'krowy';
     return 'krów';
   };
+  
+  const handleExport = async () => {
+    setIsExportLoading(true);
+    toast.loading("Przygotowywanie eksportu...");
+    try { await repository.exportExcel(); toast.dismiss(); toast.success("Eksport zakończony.");
+    } catch(err) { toast.dismiss(); toast.error(`Błąd eksportu: ${err.message}`); }
+    setIsExportLoading(false);
+  };
+  const handleImport = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+    setIsImportLoading(true);
+    toast.loading("Przetwarzanie pliku Excel... To może potrwać chwilę.");
+    try {
+      const result = await repository.importExcel(file);
+      toast.dismiss();
+      toast.success(`Import zakończony! Utworzono: ${result.created}, Zaktualizowano: ${result.updated}.`);
+      if (result.errors.length > 0) {
+        toast.warning(`Wystąpiło ${result.errors.length} błędów. Sprawdź konsolę.,`, { duration: 10000 });
+        console.warn("Błędy importu:", result.errors);
+      }
+      repository.syncCows();
+      repository.syncHerds();
+    } catch (err) {
+      toast.dismiss();
+      toast.error(`Błąd importu: ${err.message}`, { duration: 10000 });
+    } finally {
+      setIsImportLoading(false);
+      if(fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
 
   if (cows === undefined) {
     return (
       <div className="min-h-[70vh] flex items-center justify-center">
-        <div className="text-center">
-          <Loader2 className="w-12 h-12 animate-spin text-emerald-600 mx-auto mb-4" />
-          <p className="text-muted-foreground">Wczytywanie lokalnej bazy danych...</p>
-        </div>
+        <div className="text-center"><Loader2 className="w-12 h-12 animate-spin text-emerald-600 mx-auto mb-4" /><p className="text-muted-foreground">Wczytywanie lokalnej bazy danych...</p></div>
       </div>
     );
   }
 
   const filteredRows = table.getRowModel().rows;
 
+  // === NOWA FUNKCJA DO NAZYWANIA KOLUMN ===
+  const getColumnName = (id) => {
+    const names = {
+      'tag_id': 'Kolczyk', 'name': 'Imię', 'status': 'Status', 'herd_name': 'Stado',
+      'dam_name': 'Matka', 'sire_name': 'Ojciec', 'gender': 'Płeć', 'age': 'Wiek',
+      'passport_number': 'Nr Paszportu', 'color': 'Maść', 'weight': 'Waga',
+      'pregnancy_duration': 'Ciąża',
+    };
+    return names[id] || id;
+  }
+
   return (
     <div className="relative">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         
-        {/* Wskaźniki statusu */}
         {!isOnline && ( <Alert variant="destructive" className="mb-4 bg-yellow-50 border-yellow-200 text-yellow-800 dark:bg-yellow-900/30 dark:border-yellow-800 dark:text-yellow-300"> <WifiOff className="h-4 w-4" /> <AlertDescription> Jesteś offline. Zmiany zostaną zapisane lokalnie. </AlertDescription> </Alert> )}
         {isOnline && syncQueueCount > 0 && ( <Alert className="mb-4 bg-blue-50 border-blue-200 text-blue-800 dark:bg-blue-900/30 dark:border-blue-800 dark:text-blue-300"> <RefreshCw className="h-4 w-4 animate-spin" /> <AlertDescription> Synchronizowanie {syncQueueCount} {syncQueueCount === 1 ? 'zmiany' : 'zmian'}... </AlertDescription> </Alert> )}
 
-        {/* Pasek Narzędzi */}
         <div className="flex flex-col sm:flex-row items-center justify-between py-4 gap-4">
           <div className="relative w-full sm:max-w-sm">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input placeholder="Szukaj po tagu lub imieniu..." value={globalFilter ?? ""}
+            <Input placeholder="Szukaj po tagu, imieniu, paszporcie..." value={globalFilter ?? ""}
               onChange={(event) => setGlobalFilter(String(event.target.value))} className="pl-10" />
           </div>
           
-          <div className="flex gap-2 w-full sm:w-auto">
+          <div className="flex flex-wrap gap-2 w-full sm:w-auto">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" className="flex-1">
                   <SlidersHorizontal className="mr-2 h-4 w-4" /> 
-                  {statusFilter === 'ACTIVE' ? 'Aktywne' : statusFilter === 'SOLD' ? 'Sprzedane' : statusFilter === 'ARCHIVED' ? 'Archiwum' : 'Wszystkie'}
+                  Stado: {herdFilter === 'ALL' ? 'Wszystkie' : (herds?.find(h => h.id == herdFilter)?.name || '...')}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuLabel>Filtruj stado</DropdownMenuLabel>
+                <DropdownMenuRadioGroup value={herdFilter} onValueChange={setHerdFilter}>
+                  <DropdownMenuRadioItem value="ALL">Wszystkie</DropdownMenuRadioItem>
+                  {herds?.map(h => (
+                    <DropdownMenuRadioItem key={h.id} value={String(h.id)}>{h.name}</DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" className="flex-1">
+                  Status: {statusFilter === 'ACTIVE' ? 'Aktywne' : statusFilter === 'SOLD' ? 'Sprzedane' : statusFilter === 'ARCHIVED' ? 'Archiwum' : 'Wszystkie'}
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
@@ -174,66 +241,55 @@ export function CowListPage() {
                 </DropdownMenuRadioGroup>
               </DropdownMenuContent>
             </DropdownMenu>
-
-            {viewMode === 'table' && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" className="flex-1 hidden sm:flex">
-                    Widok <ChevronDown className="ml-2 h-4 w-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  {table.getAllColumns().filter((column) => column.getCanHide()).map((column) => {
-                      let columnName = column.id;
-                      if(column.id === 'tag_id') columnName = 'Kolczyk';
-                      if(column.id === 'name') columnName = 'Imię';
-                      if(column.id === 'gender') columnName = 'Płeć';
-                      if(column.id === 'age') columnName = 'Wiek';
-                      if(column.id === 'breed') columnName = 'Rasa';
-                      if(column.id === 'status') columnName = 'Status';
-                      return (
-                        <DropdownMenuCheckboxItem
-                          key={column.id} className="capitalize" checked={column.getIsVisible()}
-                          onCheckedChange={(value) => column.toggleVisibility(!!value)}
-                        > {columnName} </DropdownMenuCheckboxItem>
-                      )
-                  })}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
             
             <Button variant={viewMode === 'table' ? 'default' : 'outline'} size="icon" onClick={() => setViewMode('table')}><List className="h-4 w-4" /></Button>
             <Button variant={viewMode === 'grid' ? 'default' : 'outline'} size="icon" onClick={() => setViewMode('grid')}><LayoutGrid className="h-4 w-4" /></Button>
-
-            {/* === DODANO PRZYCISK "DODAJ" === */}
-            <Button onClick={openAddDialog} className="flex-1 sm:flex-grow-0">
-              <Plus className="mr-2 h-4 w-4" />
-              <span className="sm:hidden">Dodaj</span>
-              <span className="hidden sm:inline">Dodaj krowę</span>
-            </Button>
+            
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="icon">
+                  <ChevronDown className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => fileInputRef.current.click()} disabled={isImportLoading}>
+                  {isImportLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Upload className="mr-2 h-4 w-4" />}
+                  Importuj Excel
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleExport} disabled={isExportLoading}>
+                  {isExportLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Download className="mr-2 h-4 w-4" />}
+                  Eksportuj do Excel
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={openAddDialog}>
+                  <Plus className="mr-2 h-4 w-4" /> Dodaj krowę ręcznie
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel>Pokaż/Ukryj Kolumny (Tabela)</DropdownMenuLabel>
+                 {table.getAllColumns().filter((column) => column.getCanHide()).map((column) => {
+                    return (
+                      <DropdownMenuCheckboxItem
+                        key={column.id} className="capitalize" checked={column.getIsVisible()}
+                        onCheckedChange={(value) => column.toggleVisibility(!!value)}
+                      > {getColumnName(column.id)} </DropdownMenuCheckboxItem>
+                    )
+                 })}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <input type="file" ref={fileInputRef} className="hidden" accept=".xlsx, .xls" onChange={handleImport} />
           </div>
         </div>
         
-        {/* Kontener na widok */}
         <div>
           {viewMode === 'table' ? (
             <DataTable table={table} columns={columns} />
           ) : (
             filteredRows.length === 0 ? (
-              <div className="text-center py-12 bg-card rounded-lg shadow">
-                <p className="text-muted-foreground text-lg">Nie znaleziono krów pasujących do filtrów.</p>
-              </div>
+              <div className="text-center py-12 bg-card rounded-lg shadow"><p className="text-muted-foreground text-lg">Nie znaleziono krów pasujących do filtrów.</p></div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {filteredRows.map((row) => (
-                  <CowCard
-                    key={row.original.id}
-                    cow={row.original}
-                    onEdit={openEditDialog}
-                    onDelete={openArchiveDialog} 
-                    onAddEvent={openAddEventDialog}
-                    isOffline={row.original.id < 0}
-                  />
+                  <CowCard key={row.original.id} cow={row.original} onEdit={openEditDialog} onDelete={openArchiveDialog} onAddEvent={openAddEventDialog} isOffline={row.original.id < 0} />
                 ))}
               </div>
             )
@@ -241,27 +297,19 @@ export function CowListPage() {
         </div>
       </div>
 
-      {/* --- Dialogi (bez zmian) --- */}
       <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-        <DialogContent onClose={closeAllDialogs}>
+        <DialogContent onClose={closeAllDialogs} className="max-w-3xl">
           <DialogHeader><DialogTitle>Dodaj nową krowę</DialogTitle></DialogHeader>
           <CowForm onSubmit={handleAddCow} onCancel={closeAllDialogs} loading={formLoading} onPhotoChange={setPhotoFile} />
         </DialogContent>
       </Dialog>
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-        <DialogContent onClose={closeAllDialogs}>
+        <DialogContent onClose={closeAllDialogs} className="max-w-3xl">
           <DialogHeader><DialogTitle>Edytuj krowę</DialogTitle></DialogHeader>
           <CowForm cow={selectedCow} onSubmit={handleEditCow} onCancel={closeAllDialogs} loading={formLoading} onPhotoChange={setPhotoFile} />
         </DialogContent>
       </Dialog>
-      <DeleteCowDialog
-        cow={selectedCow}
-        open={isArchiveDialogOpen}
-        onOpenChange={setIsArchiveDialogOpen}
-        onConfirm={handleArchiveCow}
-        loading={formLoading}
-        error={null} 
-      />
+      <DeleteCowDialog cow={selectedCow} open={isArchiveDialogOpen} onOpenChange={setIsArchiveDialogOpen} onConfirm={handleArchiveCow} loading={formLoading} error={null} />
       <AddEventDialog cow={selectedCow} open={isEventDialogOpen} onOpenChange={setIsEventDialogOpen} onSubmit={handleAddEvent} loading={formLoading} error={null} />
     </div>
   );

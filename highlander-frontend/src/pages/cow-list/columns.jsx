@@ -3,12 +3,15 @@ import React from "react"
 import { Checkbox } from "../../components/ui/checkbox"
 import { Button } from "../../components/ui/button"
 import { Badge } from "../../components/ui/badge"
-import { ArrowUpDown, Archive, Edit2, PlusCircle, Eye } from "lucide-react" // <-- ZMIANA: Trash2 -> Archive
+import { ArrowUpDown, Archive, Edit2, PlusCircle, Eye } from "lucide-react" 
 
-// Funkcje pomocnicze
-const ageLabel = (age) => (age === 1 ? 'rok' : (age >= 2 && age <= 4 ? 'lata' : 'lat'));
+const ageLabel = (age) => {
+  if (!age && age !== 0) return '';
+  if (age === 1) return 'rok';
+  if (age >= 2 && age <= 4) return 'lata';
+  return 'lat';
+};
 
-// Kolory statusów
 const statusColors = {
   'ACTIVE': 'bg-green-100 text-green-800 border-green-200 dark:bg-green-900/30 dark:text-green-300 dark:border-green-800',
   'SOLD': 'bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-800',
@@ -53,7 +56,6 @@ export const getColumns = ({ onEdit, onArchive, onAddEvent, onNavigate }) => [
     ),
     cell: ({ row }) => <div className="font-medium">{row.getValue("name")}</div>,
   },
-  // === NOWA KOLUMNA: STATUS ===
   {
     accessorKey: "status",
     header: "Status",
@@ -62,9 +64,23 @@ export const getColumns = ({ onEdit, onArchive, onAddEvent, onNavigate }) => [
       const text = status === 'ACTIVE' ? 'Aktywna' : status === 'SOLD' ? 'Sprzedana' : 'Archiwum'
       return <Badge variant="outline" className={statusColors[status] || statusColors['ARCHIVED']}>{text}</Badge>
     },
-    filterFn: (row, id, value) => {
-      return value.includes(row.getValue(id))
-    },
+    filterFn: (row, id, value) => value.includes(row.getValue(id)),
+  },
+  {
+    accessorKey: "herd_name",
+    header: "Stado",
+    cell: ({ row }) => row.getValue("herd_name") || '-',
+    filterFn: (row, id, value) => value.includes(row.original.herd) 
+  },
+  {
+    accessorKey: "dam_name",
+    header: "Matka",
+    cell: ({ row }) => row.getValue("dam_name") || '-',
+  },
+  {
+    accessorKey: "sire_name",
+    header: "Ojciec",
+    cell: ({ row }) => row.getValue("sire_name") || '-',
   },
   {
     accessorKey: "gender",
@@ -73,9 +89,7 @@ export const getColumns = ({ onEdit, onArchive, onAddEvent, onNavigate }) => [
       const gender = row.getValue("gender")
       return <Badge variant={gender === 'F' ? "default" : "secondary"}>{gender === 'F' ? '♀ Samica' : '♂ Samiec'}</Badge>
     },
-    filterFn: (row, id, value) => {
-      return value.includes(row.getValue(id))
-    },
+    filterFn: (row, id, value) => value.includes(row.getValue(id)),
   },
   {
     accessorKey: "age",
@@ -86,6 +100,16 @@ export const getColumns = ({ onEdit, onArchive, onAddEvent, onNavigate }) => [
     ),
     cell: ({ row }) => <div>{row.getValue("age")} {ageLabel(row.getValue("age"))}</div>,
   },
+  {
+    accessorKey: "passport_number",
+    header: "Nr Paszportu",
+    cell: ({ row }) => row.getValue("passport_number") || '-',
+  },
+  // === NOWE POLA (Domyślnie ukryte) ===
+  { accessorKey: "color", header: "Maść", cell: ({ row }) => row.getValue("color") || '-', },
+  { accessorKey: "weight", header: "Waga", cell: ({ row }) => row.getValue("weight") || '-', },
+  { accessorKey: "pregnancy_duration", header: "Ciąża", cell: ({ row }) => row.getValue("pregnancy_duration") || '-', },
+  
   {
     id: "actions",
     header: () => <div className="text-right">Akcje</div>,
@@ -102,7 +126,6 @@ export const getColumns = ({ onEdit, onArchive, onAddEvent, onNavigate }) => [
           <Button variant="ghost" size="icon" title="Edytuj" onClick={() => onEdit(cow)}>
             <Edit2 className="h-4 w-4" />
           </Button>
-          {/* === ZMIANA: Przycisk Archiwizacji === */}
           {cow.status === 'ACTIVE' && (
             <Button variant="ghost" size="icon" title="Archiwizuj" className="text-red-600 hover:text-red-700" onClick={() => onArchive(cow)}>
               <Archive className="h-4 w-4" />

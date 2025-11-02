@@ -1,29 +1,130 @@
+/* === KROK 1: Importy (MUSZĄ BYĆ NA GÓRZE) === */
+@import 'react-big-calendar/lib/css/react-big-calendar.css';
+
+/* === KROK 2: Załadowanie bazy Tailwind === */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* === KROK 3: Definicja zmiennych (PO ładowaniu) === */
 @layer base {
   :root {
     --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    --foreground: 224 71.4% 4.1%;
     --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
-    --primary: 142.1 76.2% 36.3%;
+    --card-foreground: 224 71.4% 4.1%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 224 71.4% 4.1%;
+    
+    /* Kolor główny (Zielony/Emerald) */
+    --primary: 158 79.4% 32.2%;
     --primary-foreground: 355.7 100% 97.3%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
+    
+    /* Kolor dodatkowy (Ciepły szary/Stone) */
+    --secondary: 240 4.8% 95.9%;
+    --secondary-foreground: 240 5.9% 10%;
+    
+    --muted: 240 4.8% 95.9%;
+    --muted-foreground: 240 3.8% 46.1%;
+    
+    --accent: 240 4.8% 95.9%;
+    --accent-foreground: 240 5.9% 10%;
+    
     --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 142.1 76.2% 36.3%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 240 5.9% 90%;
+    --input: 240 5.9% 90%;
+    --ring: 158 79.4% 32.2%;
+    
     --radius: 0.5rem;
+  }
+
+  .dark {
+    /* Tło (Ciemny Kamień) */
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 98%;
+    --card: 240 10% 3.9%;
+    --card-foreground: 0 0% 98%;
+    --popover: 240 10% 3.9%;
+    --popover-foreground: 0 0% 98%;
+    
+    /* Kolor główny (Jasna Zieleń) */
+    --primary: 158 64.4% 45.3%;
+    --primary-foreground: 355.7 100% 97.3%;
+    
+    --secondary: 240 3.7% 15.9%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 240 3.7% 15.9%;
+    --muted-foreground: 240 5% 64.9%;
+    --accent: 240 3.7% 15.9%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 3.7% 15.9%;
+    --input: 240 3.7% 15.9%;
+    --ring: 158 64.4% 45.3%;
   }
 }
 
-/* === Stare hacki dla html5-qrcode zostały USUNIĘTE === */
-/* === Nie są już potrzebne === */
+/* === KROK 4: Zastosowanie klas bazowych === */
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* === KROK 5: Style dla Kalendarza === */
+/* (Teraz są PO importach i PO tailwind base) */
+@layer components {
+  .rbc-calendar {
+    @apply text-foreground !important;
+  }
+  .rbc-toolbar {
+    @apply mb-4 flex-col gap-2 sm:flex-row;
+  }
+  .rbc-toolbar .rbc-toolbar-label {
+    @apply text-2xl font-bold;
+  }
+  .rbc-btn-group button {
+    @apply text-foreground bg-card border border-border shadow-sm rounded-md px-3 py-1.5 text-sm
+           hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring;
+  }
+  .rbc-btn-group button:active, 
+  .rbc-btn-group .rbc-active {
+    @apply bg-primary text-primary-foreground shadow-inner;
+  }
+  .rbc-header {
+    @apply p-2 border-b-2 border-border text-center font-semibold text-muted-foreground;
+  }
+  .rbc-day-bg, .rbc-month-row {
+    @apply border-l border-border;
+  }
+  .rbc-month-view, .rbc-time-view, .rbc-agenda-view {
+    @apply border border-border rounded-lg overflow-hidden;
+  }
+  .rbc-day-bg.rbc-today {
+    @apply bg-primary/10;
+  }
+  .rbc-off-range-bg {
+    @apply bg-muted/50 dark:bg-muted/20;
+  }
+  .rbc-event {
+    @apply bg-primary text-primary-foreground p-1 rounded-sm text-xs;
+  }
+  .rbc-event.rbc-selected {
+    @apply bg-emerald-700;
+  }
+  .rbc-event:focus {
+    outline: none;
+  }
+  .rbc-slot-selectable {
+    @apply cursor-pointer;
+  }
+  .rbc-day-slot .rbc-event {
+    @apply border border-primary-foreground/20;
+  }
+}
