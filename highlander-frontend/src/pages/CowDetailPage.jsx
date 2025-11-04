@@ -2,9 +2,9 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks'; 
-import { repository, syncService } from '../services/api'; 
+import { repository, syncService } from '../services/api'; // Poprawiony import
 import { db } from '../db'; 
-import { Loader2, AlertCircle, ArrowLeft, Calendar, Tag, Edit2, Archive, PlusCircle, WifiOff, RefreshCw, CalendarCheck, FileText, BadgeDollarSign, ArchiveX, FileBox } from 'lucide-react';
+import { Loader2, AlertCircle, ArrowLeft, Calendar, Tag, Edit2, Archive, PlusCircle, WifiOff, RefreshCw, CalendarCheck, FileText } from 'lucide-react';
 import { Alert, AlertDescription } from '../components/ui/alert';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
@@ -19,7 +19,7 @@ import { PedigreeChart } from './cow-detail/PedigreeChart';
 import { OffspringList } from './cow-detail/OffspringList';
 import { TaskList } from '../components/TaskList'; 
 import { TaskForm } from '../components/TaskForm';
-import { DocumentList } from './cow-detail/DocumentList'; 
+import { DocumentList } from './cow-detail/DocumentList'; // <-- Poprawny import
 
 // Dialog do dodawania zadań (bez zmian)
 function AddTaskDialog({ cow, open, onOpenChange, onSubmit, loading }) {
@@ -42,29 +42,36 @@ export function CowDetailPage() {
   const cow = useLiveQuery(() => repository.getCowQuery(numericId), [numericId], undefined);
   const events = useLiveQuery(() => repository.getEventsQuery(numericId), [numericId], undefined);
   const tasks = useLiveQuery(() => repository.getTasksQuery({ cow: numericId }), [numericId], undefined);
-  const documents = useLiveQuery(() => repository.getDocumentsQuery(numericId), [numericId], undefined);
+  const documents = useLiveQuery(() => repository.getDocumentsQuery(numericId), [numericId], undefined); // <-- Stan Dokumentów
   
   const [pedigreeData, setPedigreeData] = useState(null);
   const [pedigreeLoading, setPedigreeLoading] = useState(true);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const syncQueueCount = useLiveQuery(() => db.syncQueue.count(), [], 0);
 
-  // Efekt synchronizacji (bez zmian)
+  // Efekt synchronizacji
   useEffect(() => {
     const runSync = () => { if (navigator.onLine) syncService.processSyncQueue(); };
     window.addEventListener('online', runSync);
+    
     if (numericId > 0) {
-      repository.syncCow(numericId); repository.syncEvents(numericId);
-      repository.syncTasks({ cow: numericId }); repository.syncDocuments(numericId);
+      repository.syncCow(numericId);
+      repository.syncEvents(numericId);
+      repository.syncTasks({ cow: numericId });
+      repository.syncDocuments(numericId); // <-- Synchronizuj dokumenty
+      
       setPedigreeLoading(true);
       repository.getPedigree(numericId)
         .then(data => setPedigreeData(data))
         .catch(err => toast.error(`Błąd ładowania rodowodu: ${err.message}`))
         .finally(() => setPedigreeLoading(false));
-    } else { setPedigreeLoading(false); }
+    } else {
+      setPedigreeLoading(false);
+    }
     return () => window.removeEventListener('online', runSync);
   }, [numericId]);
 
+  // Efekt statusu online (bez zmian)
   useEffect(() => {
     const handleOnline = () => setIsOnline(true); const handleOffline = () => setIsOnline(false);
     window.addEventListener('online', handleOnline); window.addEventListener('offline', handleOffline);
@@ -78,12 +85,17 @@ export function CowDetailPage() {
   const [formLoading, setFormLoading] = useState(false);
   const [photoFile, setPhotoFile] = useState(null);
 
-  const closeAllDialogs = () => { setIsEditDialogOpen(false); setIsArchiveDialogOpen(false); setIsEventDialogOpen(false); setIsTaskDialogOpen(false); setPhotoFile(null); };
+  const closeAllDialogs = () => {
+    setIsEditDialogOpen(false); setIsArchiveDialogOpen(false); setIsEventDialogOpen(false); 
+    setIsTaskDialogOpen(false); setPhotoFile(null);
+  };
 
   // Handlery (bez zmian)
   const handleEditCow = async (formData) => {
     if (!cow) return;
-    try { setFormLoading(true); const { photo, ...dataToSend } = formData; await repository.updateCow(cow.id, dataToSend);
+    try {
+      setFormLoading(true); const { photo, ...dataToSend } = formData;
+      await repository.updateCow(cow.id, dataToSend);
       if (photoFile && cow.id && navigator.onLine) { await repository.uploadPhoto(cow.id, photoFile); }
       closeAllDialogs();
     } catch (err) { toast.error(err.message); } 
@@ -91,17 +103,20 @@ export function CowDetailPage() {
   };
   const handleArchiveCow = async () => {
     if (!cow) return;
-    try { setFormLoading(true); await repository.archiveCow(cow.id); closeAllDialogs(); navigate('/herd'); 
+    try {
+      setFormLoading(true); await repository.archiveCow(cow.id); closeAllDialogs(); navigate('/herd'); 
     } catch (err) { toast.error(err.message); } 
     finally { setFormLoading(false); }
   };
   const handleAddEvent = async (eventData) => {
-    try { setFormLoading(true); await repository.createEvent(eventData); closeAllDialogs();
+    try {
+      setFormLoading(true); await repository.createEvent(eventData); closeAllDialogs();
     } catch (err) { toast.error(err.message); } 
     finally { setFormLoading(false); }
   };
   const handleAddTask = async (taskData) => {
-    try { setFormLoading(true); await repository.createTask(taskData); closeAllDialogs();
+    try {
+      setFormLoading(true); await repository.createTask(taskData); closeAllDialogs();
     } catch (err) { toast.error(err.message); } 
     finally { setFormLoading(false); }
   };
@@ -109,7 +124,7 @@ export function CowDetailPage() {
     if (navigator.onLine) { repository.syncTasks({ cow: numericId }); }
   }
 
-  // Renderowanie
+  // === POPRAWKA: Dodano 'documents' do warunku ładowania ===
   if (cow === undefined || events === undefined || tasks === undefined || documents === undefined) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -117,16 +132,25 @@ export function CowDetailPage() {
       </div>
     );
   }
+  
   if (!cow) {
      return (
        <div className="min-h-screen bg-background p-8 max-w-2xl mx-auto text-center">
-         <Alert variant="destructive"><AlertCircle className="h-4 w-4" /><AlertDescription>{isOnline ? "Nie znaleziono krowy." : "Brak połączenia i krowa nie była zapisana lokalnie."}</AlertDescription></Alert>
-         <Button variant="outline" size="sm" onClick={() => navigate(-1)} className="mt-4"><ArrowLeft className="w-4 h-4 mr-2" /> Wróć</Button>
+         <Alert variant="destructive">
+           <AlertCircle className="h-4 w-4" />
+           <AlertDescription>
+             {isOnline ? "Nie znaleziono krowy." : "Brak połączenia i krowa nie była zapisana lokalnie."}
+           </AlertDescription>
+         </Alert>
+         <Button variant="outline" size="sm" onClick={() => navigate(-1)} className="mt-4">
+           <ArrowLeft className="w-4 h-4 mr-2" />
+           Wróć
+         </Button>
        </div>
      );
   }
 
-  const formatDate = (dateString) => dateString ? new Date(dateString).toLocaleDateString('pl-PL') : 'Brak danych';
+  const formatDate = (dateString) => new Date(dateString).toLocaleDateString('pl-PL');
   const ageLabel = (age) => (age === 1 ? 'rok' : (age >= 2 && age <= 4 ? 'lata' : 'lat'));
   const activeTasksCount = tasks.filter(t => !t.is_completed).length;
 
@@ -141,7 +165,6 @@ export function CowDetailPage() {
         {!isOnline && ( <Alert variant="destructive" className="mb-4 bg-yellow-50 border-yellow-200 text-yellow-800 dark:bg-yellow-900/30 dark:border-yellow-800 dark:text-yellow-300"> <WifiOff className="h-4 w-4" /> <AlertDescription> Jesteś offline. Zmiany zostaną zapisane lokalnie. </AlertDescription> </Alert> )}
         {isOnline && syncQueueCount > 0 && ( <Alert className="mb-4 bg-blue-50 border-blue-200 text-blue-800 dark:bg-blue-900/30 dark:border-blue-800 dark:text-blue-300"> <RefreshCw className="h-4 w-4 animate-spin" /> <AlertDescription> Synchronizowanie {syncQueueCount} {syncQueueCount === 1 ? 'zmiany' : 'zmian'}... </AlertDescription> </Alert> )}
 
-        {/* Karta krowy (zaktualizowana) */}
         <div className="bg-card rounded-lg shadow-lg overflow-hidden mb-8 border border-border">
           <div className="grid grid-cols-1 md:grid-cols-2">
             <div className="p-4">{/* ... Zdjęcie ... */}
@@ -166,47 +189,15 @@ export function CowDetailPage() {
                     <span className="font-semibold text-foreground">Ur.:</span>
                     <span>{formatDate(cow.birth_date)} ({(cow.age || '?')} {ageLabel(cow.age || 0)})</span>
                   </div>
-                  {/* === ZMIANA: Dodano więcej pól === */}
+                  <div className="flex items-center gap-3"><span className="font-semibold text-foreground ml-8">Rasa:</span><span>{cow.breed}</span></div>
                   <div className="flex items-center gap-3">
-                    <FileBox className="w-5 h-5 text-gray-500" />
-                    <span className="font-semibold text-foreground">Paszport:</span>
-                    <span>{cow.passport_number || '-'}</span>
+                    <span className="font-semibold text-foreground ml-8">Matka:</span>
+                    {cow.dam_name ? (<Button variant="link" size="sm" className="p-0 h-auto" onClick={() => navigate(`/cow/${cow.dam}`)}>{cow.dam_name}</Button>) : ( <span>Nieznana</span> )}
                   </div>
                   <div className="flex items-center gap-3">
-                    <span className="font-semibold text-foreground ml-8">Rasa:</span>
-                    <span>{cow.breed}</span>
+                    <span className="font-semibold text-foreground ml-8">Ojciec:</span>
+                    {cow.sire_name ? (<Button variant="link" size="sm" className="p-0 h-auto" onClick={() => navigate(`/cow/${cow.sire}`)}>{cow.sire_name}</Button>) : ( <span>Nieznany</span> )}
                   </div>
-                  <div className="flex items-center gap-3">
-                    <span className="font-semibold text-foreground ml-8">Stado:</span>
-                    <span>{cow.herd_name || 'Brak'}</span>
-                  </div>
-                  
-                  {/* === NOWE POLA WYJŚCIA === */}
-                  {(cow.status === 'SOLD' || cow.status === 'ARCHIVED') && (
-                    <div className="border-t pt-3 mt-3 space-y-2">
-                       <div className="flex items-center gap-3">
-                         <ArchiveX className="w-5 h-5 text-red-600" />
-                         <span className="font-semibold text-foreground">Status:</span>
-                         <span className="font-bold text-red-600">{cow.status === 'SOLD' ? 'Sprzedana' : 'Zarchiwizowana'}</span>
-                       </div>
-                       <div className="flex items-center gap-3">
-                         <span className="font-semibold text-foreground ml-8">Data:</span>
-                         <span>{formatDate(cow.exit_date)}</span>
-                       </div>
-                       <div className="flex items-center gap-3">
-                         <span className="font-semibold text-foreground ml-8">Powód:</span>
-                         <span>{cow.exit_reason || '-'}</span>
-                       </div>
-                       {cow.sale_price && (
-                         <div className="flex items-center gap-3">
-                           <BadgeDollarSign className="w-5 h-5 text-green-600" />
-                           <span className="font-semibold text-foreground">Kwota:</span>
-                           <span>{cow.sale_price} zł</span>
-                         </div>
-                       )}
-                    </div>
-                  )}
-                  
                 </div>
               </div>
               <div className="flex gap-3 mt-8">
@@ -235,14 +226,15 @@ export function CowDetailPage() {
               Zadania 
               {activeTasksCount > 0 && <Badge className="ml-2 bg-red-600">{activeTasksCount}</Badge>}
             </TabsTrigger>
-            <TabsTrigger value="history">Historia ({events?.length || 0})</TabsTrigger>
+            <TabsTrigger value="history">Historia ({events.length})</TabsTrigger>
             <TabsTrigger value="pedigree">Rodowód</TabsTrigger>
-            <TabsTrigger value="documents">Dokumenty ({documents?.length || 0})</TabsTrigger>
+            <TabsTrigger value="documents">Dokumenty ({documents?.length || 0})</TabsTrigger> {/* <-- NOWA ZAKŁADKA */}
           </TabsList>
           
           <TabsContent value="tasks">
             <TaskList tasks={tasks} onTaskUpdated={handleTaskUpdated} />
           </TabsContent>
+          
           <TabsContent value="history">
             <Button size="sm" onClick={() => setIsEventDialogOpen(true)} className="mb-4 bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600">
               <PlusCircle className="w-4 h-4 mr-2" />
@@ -250,6 +242,7 @@ export function CowDetailPage() {
             </Button>
             <EventTimeline events={events} />
           </TabsContent>
+          
           <TabsContent value="pedigree">
             {pedigreeLoading ? (
               <div className="flex justify-center p-8"><Loader2 className="w-8 h-8 animate-spin" /></div>
@@ -262,9 +255,12 @@ export function CowDetailPage() {
               <p className="text-muted-foreground">Nie można załadować rodowodu (sprawdź połączenie). Krowy dodane offline nie mają rodowodu.</p>
             )}
           </TabsContent>
+          
+          {/* === NOWA ZAWARTOŚĆ ZAKŁADKI === */}
           <TabsContent value="documents">
             <DocumentList cowId={numericId} />
           </TabsContent>
+          
         </Tabs>
       </div>
 
